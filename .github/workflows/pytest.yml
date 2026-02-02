@@ -10,6 +10,36 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: user
+          POSTGRES_PASSWORD: password
+          POSTGRES_DB: db
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      API_DATABASE_URL: postgresql+psycopg2://user:password@localhost/db
+      API_PREFIX: /api/v1
+      API_FILE_STORAGE_DIR: /tmp/storage
+      API_SECRET_KEY: testsecret
+      API_CLIENT_VERIFICATION_ENABLED: "False"
+      API_PRIVATE_KEY_PASSWORD: test123
+      OIDC_CLIENT_ID: test
+      OIDC_CLIENT_SECRET: test-secret
+      OIDC_METADATA_URL: http://localhost:9000/.well-known/openid-configuration
+      OIDC_SCOPE: openid,profile,email
+      OIDC_REFRESH_URI: http://localhost:9000/token
+      OIDC_REDIRECT_URI: http://localhost:8000/api/auth
+      OIDC_FRONTEND_URI: http://localhost:8888
+
     steps:
       - uses: actions/checkout@v4
 
@@ -23,6 +53,25 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --dev
+
+      - name: Create storage directory
+        run: mkdir -p /tmp/storage
+
+      - name: Initialize database
+        run: uv run alembic upgrade head
+
+      - name: Start backend server
+        run: |
+          uv run uvicorn app:app --host 0.0.0.0 --port 8000 &
+          sleep 5
+          for i in {1..30}; do
+            if curl -s http://localhost:8000/api/v1/healthcheck > /dev/null; then
+              echo "Backend is ready"
+              break
+            fi
+            echo "Waiting for backend... ($i/30)"
+            sleep 2
+          done
 
       - name: Run tests
         run: uv run pytest
