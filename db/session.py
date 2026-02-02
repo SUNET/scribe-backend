@@ -24,9 +24,11 @@ def get_sessionmaker() -> sessionmaker:
 
     engine = create_engine(settings.API_DATABASE_URL)
 
-    connection = engine.connect()
-    if connection.dialect.has_schema(connection, "transcribe"):
-        engine.execute(schema.CreateSchema("transcribe"))
+    with engine.connect() as connection:
+        if not connection.dialect.has_schema(connection, "transcribe"):
+            log.info("Creating 'transcribe' schema in the database.")
+            connection.execute(schema.CreateSchema("transcribe"))
+            connection.commit()
 
     SQLModel.metadata.create_all(engine)
     return sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -43,6 +45,7 @@ def get_session() -> Generator[Session, None, None]:
 
     db_session_factory = get_sessionmaker()
     session: Session = db_session_factory()
+
     try:
         yield session
     except Exception:
