@@ -57,6 +57,9 @@ jobs:
       - name: Create storage directory
         run: mkdir -p /tmp/storage
 
+      - name: Create database
+        run: uv run init_db.py
+
       - name: Initialize database
         run: uv run alembic upgrade head
 
