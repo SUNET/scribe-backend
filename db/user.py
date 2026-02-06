@@ -75,16 +75,20 @@ def user_create(
         admins = users_admin_domains_from_realm(realm)
 
         for admin in admins:
-            # Check if the admin has the user notifications enabled
+            if not admin["admin"]:
+                continue
+
             if admin_email := user_get_notifications(admin["user_id"], "user"):
-                # Check if we have already sent a notification for this user creation
-                if not notifications.notification_sent_record_exists(
+                if notifications.notification_sent_record_exists(
                     admin["user_id"], user.user_id, "user_creation"
                 ):
-                    notifications.send_new_user_created(admin_email, username)
-                    notifications.notification_sent_record_add(
-                        admin["user_id"], user.user_id, "user_creation"
-                    )
+                    continue
+
+                notifications.send_new_user_created(admin_email, username)
+                notifications.notification_sent_record_add(
+                    admin["user_id"], user.user_id, "user_creation"
+                )
+                log.info(f"Sent new user creation notification to admin {admin_email}")
 
         return user.dict()
 
@@ -766,6 +770,6 @@ def users_admin_domains_from_realm(realm: str) -> list:
     """
 
     with get_session() as session:
-        users = session.query(User).filter(User.admin_domains.ilike(f"%{realm}%")).all()
+        users = session.query(User).filter(User.admin_domains.ilike(realm)).all()
 
         return [user.as_dict() for user in users]

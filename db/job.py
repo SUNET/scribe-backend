@@ -369,7 +369,7 @@ def job_cleanup() -> None:
                 f"Sending transcription deletion notification to user {user.user_id} for job {job.uuid}."
             )
 
-            notifications.send_transcription_finished(user.email)
+            notifications.send_job_deleted(user.email)
             notifications.notification_sent_record_add(
                 user.user_id, job.uuid, "deletion"
             )

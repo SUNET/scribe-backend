@@ -1,4 +1,4 @@
-# transcribe-backend
+# scribe-backend
 
 Backend built on FastAPI for the SUNET transcription service (Sunet Scribe).
 
@@ -24,7 +24,7 @@ Backend built on FastAPI for the SUNET transcription service (Sunet Scribe).
 
 ```bash
 git clone <repository-url>
-cd transcribe-backend
+cd scribe-backend
 uv sync
 ```
 
@@ -131,8 +131,8 @@ uv run alembic revision --autogenerate -m "Description of changes"
 Build and run with Docker:
 
 ```bash
-docker build -t transcribe-backend .
-docker run -p 8000:8000 --env-file .env transcribe-backend
+docker build -t scribe-backend .
+docker run -p 8000:8000 --env-file .env scribe-backend
 ```
 
 ## Testing
@@ -146,7 +146,7 @@ uv run pytest
 ## Project Structure
 
 ```
-transcribe-backend/
+scribe-backend/
 ├── app.py              # FastAPI application entry point
 ├── alembic/            # Database migrations
 ├── auth/               # Authentication (OIDC, client verification)
