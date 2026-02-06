@@ -1,6 +1,6 @@
 import json
 
-from auth.client import dn_in_list, verify_client_dn
+from auth.client import verify_client_dn
 from fastapi import APIRouter, UploadFile, Request, Depends
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -15,7 +15,6 @@ from db.user import (
     user_get_from_job,
     user_get_private_key,
     user_get_public_key,
-    user_get_username_from_job,
     user_update,
     user_get_notifications,
 )
@@ -58,7 +57,6 @@ async def update_transcription_status(
     """
 
     user_id = user_get_from_job(job_id)
-    username = user_get_username_from_job(job_id)
 
     if user_id is None or job_id is None:
         raise Exception("Job or user not found: {} - {}".format(job_id, user_id))
