@@ -43,7 +43,7 @@ class InferenceWSManager:
 
         try:
             await worker.send_json({"request_id": request_id, **payload})
-            return await asyncio.wait_for(future, timeout=120.0)
+            return await asyncio.wait_for(future, timeout=600.0)
         except asyncio.TimeoutError:
             raise RuntimeError("Inference request timed out")
         finally:
