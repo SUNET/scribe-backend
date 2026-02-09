@@ -113,7 +113,6 @@ async def delete_external_transcription_job(
     Returns:
         JSONResponse: The result of the deletion.
     """
-
     job = job_get_by_external_id(external_id, client_dn)
 
     if not job:
@@ -121,19 +120,17 @@ async def delete_external_transcription_job(
             content={"result": {"error": "Job not found"}}, status_code=404
         )
 
-    if not (status := job_remove(job["uuid"])):
-        logger.error(f"Failed to remove job with external_id {external_id} - status: {status}")
+    # Delete the job from the database
+    status = job_remove(job["uuid"])
 
-    file_path = Path(api_file_storage_dir) / job["user_id"] / f"{job["uuid"]}"
-    file_path_enc = Path(api_file_storage_dir) / job["user_id"] / f"{job["uuid"]}.mp4.enc"
+    if status is False:
+        logger.debug(f"JOB REMOVE FALSE: {job}")
+
+    # Remove the video file if it exists
+    file_path = Path(api_file_storage_dir) / job["user_id"] / f"{job["uuid"]}.mp4"
 
     if file_path.exists():
-        logger.info(f"Removing file for job {external_id} at {file_path}")
         file_path.unlink()
-
-    if file_path_enc.exists():
-        logger.info(f"Removing encrypted file for job {external_id} at {file_path_enc}")
-        file_path_enc.unlink()
 
     return JSONResponse(content={"result": {"status": "OK"}})
 
