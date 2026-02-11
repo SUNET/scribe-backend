@@ -67,6 +67,8 @@ class Settings(BaseSettings):
         1024 * 1024
     )  # 1MB - must match chunk_size in encrypt_data_to_file
 
+    NOTIFICATION_MAIL_SENDER_BRANDING: str = "Sunet Scribe"
+
     # E-mail notifications
     NOTIFICATION_MAIL_UPDATED: dict = {
         "subject": "Your e-mail address have been updated",

@@ -93,7 +93,7 @@ class Notifications:
             server.login(settings.API_SMTP_USERNAME, settings.API_SMTP_PASSWORD)
 
             for email in to_emails:
-                mail_to_send = f"From: Sunet Scribe <{settings.API_SMTP_SENDER}>\nTo: {email}\nSubject: {subject}\n\n{message}"
+                mail_to_send = f"From: {settings.NOTIFICATION_MAIL_SENDER_BRANDING} <{settings.API_SMTP_SENDER}>\nTo: {email}\nSubject: {subject}\n\n{message}"
                 server.sendmail(settings.API_SMTP_SENDER, to_emails, mail_to_send)
                 logger.info(f"Email sent to {', '.join(to_emails)}")
         except Exception as e:
