@@ -25,10 +25,11 @@ def get_sessionmaker() -> sessionmaker:
     engine = create_engine(settings.API_DATABASE_URL)
 
     with engine.connect() as connection:
-        if not connection.dialect.has_schema(connection, "transcribe"):
-            log.info("Creating 'transcribe' schema in the database.")
-            connection.execute(schema.CreateSchema("transcribe"))
-            connection.commit()
+        if connection.dialect.name != "sqlite":
+            if not connection.dialect.has_schema(connection, "transcribe"):
+                log.info("Creating 'transcribe' schema in the database.")
+                connection.execute(schema.CreateSchema("transcribe"))
+                connection.commit()
 
     SQLModel.metadata.create_all(engine)
     return sessionmaker(autocommit=False, autoflush=False, bind=engine)
