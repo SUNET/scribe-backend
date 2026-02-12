@@ -72,7 +72,7 @@ def init_database():
 
         # Create schema if needed (for PostgreSQL)
         with engine.connect() as connection:
-            if connection.dialect.name == "postgresql":
+            if connection.dialect.name != "sqlite":
                 if connection.dialect.has_schema(connection, "transcribe"):
                     print("Schema 'transcribe' already exists")
                 else:
