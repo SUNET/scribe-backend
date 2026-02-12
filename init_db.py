@@ -72,15 +72,16 @@ def init_database():
 
         # Create schema if needed (for PostgreSQL)
         with engine.connect() as connection:
-            if connection.dialect.has_schema(connection, "transcribe"):
-                print("Schema 'transcribe' already exists")
-            else:
-                try:
-                    connection.execute(schema.CreateSchema("transcribe"))
-                    connection.commit()
-                    print("Created schema 'transcribe'")
-                except Exception as e:
-                    print(f"Schema creation skipped: {e}")
+            if connection.dialect.name == "postgresql":
+                if connection.dialect.has_schema(connection, "transcribe"):
+                    print("Schema 'transcribe' already exists")
+                else:
+                    try:
+                        connection.execute(schema.CreateSchema("transcribe"))
+                        connection.commit()
+                        print("Created schema 'transcribe'")
+                    except Exception as e:
+                        print(f"Schema creation skipped: {e}")
 
         # Create all tables
         print("Creating database tables...")
