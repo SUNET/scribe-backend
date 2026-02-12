@@ -66,9 +66,14 @@ async def set_user_info(
     elif item.verify_password:
         private_key = user_get_private_key(user["user_id"])
 
-        if not validate_private_key_password(private_key, item.encryption_password):
+        try:
+            validate_private_key_password(private_key, item.encryption_password)
+        except ValueError:
+            log.info(
+                f"Invalid private key password for user {user["user_id"]}"
+            )
             return JSONResponse(
-                content={"error": "Invalid encryption password"},
+                content={"error": "Invalid private key or password"},
                 status_code=403,
             )
     elif item.email is not None:
