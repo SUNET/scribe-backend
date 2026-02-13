@@ -360,7 +360,14 @@ def group_update(
                 )
 
                 if found:
-                    raise ValueError(f"User {username} is already in another group.")
+                    other_group_name = (
+                        session.query(Group.name)
+                        .filter(Group.id == found.group_id)
+                        .scalar()
+                    )
+                    raise ValueError(
+                        f'User {username} is already in the group "{other_group_name}".'
+                    )
 
             links = (
                 session.query(GroupUserLink)
