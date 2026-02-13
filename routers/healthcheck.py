@@ -90,13 +90,19 @@ async def get_status() -> JSONResponse:
     online_count = 0
     worker_data = health.get()
 
-    for worker_id, stats in worker_data.items():
+    workers_detail = {}
+    for idx, (worker_id, stats) in enumerate(worker_data.items()):
         if stats:
             last_seen = stats[-1].get("seen", 0)
             if now - last_seen < 120:
                 online_count += 1
+                gpu = stats[-1].get("gpu_usage", 0)
+                if isinstance(gpu, list):
+                    gpu = max(gpu) if gpu else 0
+                workers_detail[f"worker-{idx}"] = {"busy": gpu > 0}
 
     status["workers_online"] = online_count
+    status["workers_detail"] = workers_detail
     if online_count > 0:
         status["workers"] = "ok"
 
