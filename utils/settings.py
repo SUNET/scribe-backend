@@ -216,7 +216,7 @@ This is an automated message from Sunet Scribe. If you need assistance, please c
     }
 
     NOTIFICATION_MAIL_GROUP_QUOTA_ALERT: dict = {
-        "subject": "Group quota is nearing its limit",
+        "subject": "Group is nearing its limit",
         "message": """\
 Hello,
 
