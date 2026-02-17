@@ -5,6 +5,7 @@ from sqlalchemy import or_
 from typing import Optional
 
 from utils.log import get_logger
+from utils.notifications import notifications
 
 log = get_logger()
 
@@ -545,3 +546,68 @@ def group_get_users(group_id: str, realm: str) -> list[dict]:
             return []
 
         return [user.as_dict() for user in group.users]
+
+
+def check_group_quota_alerts() -> None:
+    """
+    Check all groups with a quota for 95%+ consumption.
+    Sends email alerts to admin users of the group's realm who have the quota notification enabled.
+
+    Returns:
+        None
+    """
+
+    with get_session() as session:
+        groups = session.query(Group).filter(
+            Group.quota_seconds > 0,
+        ).all()
+
+        for group in groups:
+            quota_seconds = group.quota_seconds
+            used_seconds = 0
+
+            for user in group.users:
+                used_seconds += user.transcribed_seconds if user.transcribed_seconds else 0
+
+            usage_percent = int((used_seconds / quota_seconds) * 100)
+
+            if usage_percent < 95:
+                continue
+
+            quota_minutes = quota_seconds // 60
+            used_minutes = used_seconds // 60
+            remaining_minutes = max(quota_minutes - used_minutes, 0)
+
+            admin_users = session.query(User).filter(
+                User.admin == True,
+                User.admin_domains.ilike(f"%{group.realm}%"),
+            ).all()
+
+            for admin_user in admin_users:
+                if not admin_user.notifications or "quota" not in admin_user.notifications.split(","):
+                    continue
+
+                if not admin_user.email:
+                    continue
+
+                if notifications.notification_sent_record_exists(
+                    admin_user.user_id, str(group.id), "group_quota_alert"
+                ):
+                    continue
+
+                notifications.send_group_quota_alert(
+                    to_email=admin_user.email,
+                    group_name=group.name,
+                    usage_percent=usage_percent,
+                    quota_minutes=quota_minutes,
+                    used_minutes=used_minutes,
+                    remaining_minutes=remaining_minutes,
+                )
+
+                notifications.notification_sent_record_add(
+                    admin_user.user_id, str(group.id), "group_quota_alert"
+                )
+
+                log.info(
+                    f"Group quota alert sent to {admin_user.email} for group {group.name} ({usage_percent}%)"
+                )

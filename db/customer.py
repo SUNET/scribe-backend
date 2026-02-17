@@ -8,6 +8,7 @@ from db.models import Customer, User
 from db.session import get_session
 from typing import Optional
 from utils.log import get_logger
+from utils.notifications import notifications
 from utils.settings import get_settings
 
 settings = get_settings()
@@ -619,3 +620,117 @@ def export_customers_to_csv(admin_user: dict) -> str:
         writer.writerow(row)
 
     return output.getvalue()
+
+
+def check_quota_alerts() -> None:
+    """
+    Check all fixed-plan customers for 95%+ block quota consumption.
+    Sends email alerts to admin users who have the quota notification enabled.
+
+    Returns:
+        None
+    """
+
+    with get_session() as session:
+        customers = session.query(Customer).filter(
+            Customer.priceplan == "fixed",
+            Customer.blocks_purchased > 0,
+        ).all()
+
+        for customer in customers:
+            stats = customer_get_statistics(customer.id)
+            minutes_included = stats.get("minutes_included", 0)
+
+            if minutes_included == 0:
+                continue
+
+            minutes_consumed = stats.get("total_transcribed_minutes", 0)
+            usage_percent = int((minutes_consumed / minutes_included) * 100)
+
+            if usage_percent < 95:
+                continue
+
+            realm_list = [r.strip() for r in customer.realms.split(",") if r.strip()]
+
+            for realm in realm_list:
+                admin_users = session.query(User).filter(
+                    User.admin == True,
+                    User.admin_domains.ilike(f"%{realm}%"),
+                ).all()
+
+                for admin_user in admin_users:
+                    if not admin_user.notifications or "quota" not in admin_user.notifications.split(","):
+                        continue
+
+                    if not admin_user.email:
+                        continue
+
+                    if notifications.notification_sent_record_exists(
+                        admin_user.user_id, str(customer.id), "quota_alert"
+                    ):
+                        continue
+
+                    notifications.send_quota_alert(
+                        to_email=admin_user.email,
+                        customer_name=customer.name,
+                        usage_percent=usage_percent,
+                        blocks_purchased=stats.get("blocks_purchased", 0),
+                        minutes_included=minutes_included,
+                        minutes_consumed=minutes_consumed,
+                        remaining_minutes=stats.get("remaining_minutes", 0),
+                    )
+
+                    notifications.notification_sent_record_add(
+                        admin_user.user_id, str(customer.id), "quota_alert"
+                    )
+
+                    log.info(
+                        f"Quota alert sent to {admin_user.email} for customer {customer.name} ({usage_percent}%)"
+                    )
+
+
+def send_weekly_usage_reports() -> None:
+    """
+    Send weekly usage reports to admin users who have the weekly report notification enabled.
+
+    Returns:
+        None
+    """
+
+    with get_session() as session:
+        customers = session.query(Customer).all()
+
+        for customer in customers:
+            stats = customer_get_statistics(customer.id)
+            realm_list = [r.strip() for r in customer.realms.split(",") if r.strip()]
+
+            for realm in realm_list:
+                admin_users = session.query(User).filter(
+                    User.admin == True,
+                    User.admin_domains.ilike(f"%{realm}%"),
+                ).all()
+
+                for admin_user in admin_users:
+                    if not admin_user.notifications or "weekly_report" not in admin_user.notifications.split(","):
+                        continue
+
+                    if not admin_user.email:
+                        continue
+
+                    notifications.send_weekly_usage_report(
+                        to_email=admin_user.email,
+                        customer_name=customer.name,
+                        total_users=stats.get("total_users", 0),
+                        transcribed_files=stats.get("transcribed_files", 0),
+                        transcribed_minutes=stats.get("transcribed_minutes", 0),
+                        transcribed_minutes_external=stats.get("transcribed_minutes_external", 0),
+                        blocks_purchased=stats.get("blocks_purchased", 0),
+                        blocks_consumed=stats.get("blocks_consumed", 0),
+                        minutes_included=stats.get("minutes_included", 0),
+                        remaining_minutes=stats.get("remaining_minutes", 0),
+                        overage_minutes=stats.get("overage_minutes", 0),
+                    )
+
+                    log.info(
+                        f"Weekly usage report sent to {admin_user.email} for customer {customer.name}"
+                    )

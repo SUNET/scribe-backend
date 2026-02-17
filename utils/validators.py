@@ -75,6 +75,8 @@ class NotificationSettings(BaseModel):
     notify_on_job: Optional[bool] = None
     notify_on_deletion: Optional[bool] = None
     notify_on_user: Optional[bool] = None
+    notify_on_quota: Optional[bool] = None
+    notify_on_weekly_report: Optional[bool] = None
 
 
 class UserUpdateRequest(BaseModel):

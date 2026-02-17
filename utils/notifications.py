@@ -272,5 +272,131 @@ class Notifications:
             message=settings.NOTIFICATION_MAIL_ACCOUNT_ACTIVATED["message"],
         )
 
+    def send_quota_alert(
+        self,
+        to_email: str,
+        customer_name: str,
+        usage_percent: int,
+        blocks_purchased: int,
+        minutes_included: int,
+        minutes_consumed: int,
+        remaining_minutes: int,
+    ) -> None:
+        """
+        Send a quota alert notification to an admin.
+
+        Parameters:
+            to_email (str): The recipient's email address.
+            customer_name (str): The customer name.
+            usage_percent (int): The percentage of quota consumed.
+            blocks_purchased (int): Number of blocks purchased.
+            minutes_included (int): Total minutes included.
+            minutes_consumed (int): Minutes consumed so far.
+            remaining_minutes (int): Minutes remaining.
+
+        Returns:
+            None
+        """
+
+        self.add(
+            to_emails=[to_email],
+            subject=settings.NOTIFICATION_MAIL_QUOTA_ALERT["subject"],
+            message=settings.NOTIFICATION_MAIL_QUOTA_ALERT["message"].format(
+                customer_name=customer_name,
+                usage_percent=usage_percent,
+                blocks_purchased=blocks_purchased,
+                minutes_included=minutes_included,
+                minutes_consumed=minutes_consumed,
+                remaining_minutes=remaining_minutes,
+            ),
+        )
+
+    def send_group_quota_alert(
+        self,
+        to_email: str,
+        group_name: str,
+        usage_percent: int,
+        quota_minutes: int,
+        used_minutes: int,
+        remaining_minutes: int,
+    ) -> None:
+        """
+        Send a group quota alert notification to an admin.
+
+        Parameters:
+            to_email (str): The recipient's email address.
+            group_name (str): The group name.
+            usage_percent (int): The percentage of quota consumed.
+            quota_minutes (int): Total quota in minutes.
+            used_minutes (int): Minutes used so far.
+            remaining_minutes (int): Minutes remaining.
+
+        Returns:
+            None
+        """
+
+        self.add(
+            to_emails=[to_email],
+            subject=settings.NOTIFICATION_MAIL_GROUP_QUOTA_ALERT["subject"],
+            message=settings.NOTIFICATION_MAIL_GROUP_QUOTA_ALERT["message"].format(
+                group_name=group_name,
+                usage_percent=usage_percent,
+                quota_minutes=quota_minutes,
+                used_minutes=used_minutes,
+                remaining_minutes=remaining_minutes,
+            ),
+        )
+
+    def send_weekly_usage_report(
+        self,
+        to_email: str,
+        customer_name: str,
+        total_users: int,
+        transcribed_files: int,
+        transcribed_minutes: int,
+        transcribed_minutes_external: int,
+        blocks_purchased: int,
+        blocks_consumed: float,
+        minutes_included: int,
+        remaining_minutes: int,
+        overage_minutes: int,
+    ) -> None:
+        """
+        Send a weekly usage report notification to an admin.
+
+        Parameters:
+            to_email (str): The recipient's email address.
+            customer_name (str): The customer name.
+            total_users (int): Total number of users.
+            transcribed_files (int): Number of files transcribed.
+            transcribed_minutes (int): Minutes transcribed.
+            transcribed_minutes_external (int): Minutes transcribed externally.
+            blocks_purchased (int): Number of blocks purchased.
+            blocks_consumed (float): Blocks consumed.
+            minutes_included (int): Total minutes included.
+            remaining_minutes (int): Minutes remaining.
+            overage_minutes (int): Overage minutes.
+
+        Returns:
+            None
+        """
+
+        self.add(
+            to_emails=[to_email],
+            subject=settings.NOTIFICATION_MAIL_WEEKLY_USAGE_REPORT["subject"],
+            message=settings.NOTIFICATION_MAIL_WEEKLY_USAGE_REPORT["message"].format(
+                customer_name=customer_name,
+                total_users=total_users,
+                transcribed_files=transcribed_files,
+                transcribed_minutes=transcribed_minutes,
+                transcribed_minutes_external=transcribed_minutes_external,
+                blocks_purchased=blocks_purchased,
+                blocks_consumed=blocks_consumed,
+                minutes_included=minutes_included,
+                remaining_minutes=remaining_minutes,
+                overage_minutes=overage_minutes,
+            ),
+        )
+
 
 notifications = Notifications()

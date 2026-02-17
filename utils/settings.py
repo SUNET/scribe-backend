@@ -195,6 +195,72 @@ This is an automated message from Sunet Scribe. If you need assistance, please c
 """,
     }
 
+    NOTIFICATION_MAIL_QUOTA_ALERT: dict = {
+        "subject": "Block quota is nearing its limit",
+        "message": """\
+Hello,
+
+The block quota for customer {customer_name} has reached {usage_percent}% utilization.
+
+Usage summary:
+- Blocks purchased: {blocks_purchased}
+- Minutes included: {minutes_included}
+- Minutes consumed: {minutes_consumed}
+- Minutes remaining: {remaining_minutes}
+
+Best regards,
+Sunet Scribe
+
+This is an automated message from Sunet Scribe. If you need assistance, please contact your local support.
+""",
+    }
+
+    NOTIFICATION_MAIL_GROUP_QUOTA_ALERT: dict = {
+        "subject": "Group quota is nearing its limit",
+        "message": """\
+Hello,
+
+The group "{group_name}" has reached {usage_percent}% of its transcription quota.
+
+Usage summary:
+- Quota: {quota_minutes} minutes
+- Used: {used_minutes} minutes
+- Remaining: {remaining_minutes} minutes
+
+Best regards,
+Sunet Scribe
+
+This is an automated message from Sunet Scribe. If you need assistance, please contact your local support.
+""",
+    }
+
+    NOTIFICATION_MAIL_WEEKLY_USAGE_REPORT: dict = {
+        "subject": "Weekly usage report for Sunet Scribe",
+        "message": """\
+Hello,
+
+Here is the weekly usage report for customer {customer_name}:
+
+Current month:
+- Total users: {total_users}
+- Files transcribed: {transcribed_files}
+- Minutes transcribed: {transcribed_minutes}
+- Minutes transcribed (external): {transcribed_minutes_external}
+
+Block usage:
+- Blocks purchased: {blocks_purchased}
+- Blocks consumed: {blocks_consumed}
+- Minutes included: {minutes_included}
+- Minutes remaining: {remaining_minutes}
+- Overage minutes: {overage_minutes}
+
+Best regards,
+Sunet Scribe
+
+This is an automated message from Sunet Scribe. If you need assistance, please contact your local support.
+""",
+    }
+
 
 @lru_cache
 def get_settings() -> Settings:

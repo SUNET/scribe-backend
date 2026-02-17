@@ -3,6 +3,8 @@ import requests
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
 from fastapi_utils.tasks import repeat_every
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -17,6 +19,8 @@ from db.user import (
     user_update,
     user_get,
 )
+from db.customer import check_quota_alerts, send_weekly_usage_reports
+from db.group import check_group_quota_alerts
 
 from fastapi.openapi.utils import get_openapi
 from routers.admin import router as admin_router
@@ -282,3 +286,36 @@ def create_api_user_on_startup() -> None:
             encryption_password=settings.API_PRIVATE_KEY_PASSWORD,
             encryption_settings=True,
         )
+
+
+@app.on_event("startup")
+@repeat_every(seconds=60 * 60)
+def check_quota_alerts_task() -> None:
+    """
+    Periodic task to check block quota consumption and alert admins at 95%+.
+
+    Returns:
+        None
+    """
+
+    check_quota_alerts()
+    check_group_quota_alerts()
+
+
+scheduler = BackgroundScheduler()
+scheduler.add_job(
+    send_weekly_usage_reports,
+    CronTrigger(day_of_week="mon", hour=6, minute=0),
+    id="send_weekly_usage_reports",
+    replace_existing=True,
+)
+
+
+@app.on_event("startup")
+def start_scheduler() -> None:
+    scheduler.start()
+
+
+@app.on_event("shutdown")
+def stop_scheduler() -> None:
+    scheduler.shutdown(wait=False)

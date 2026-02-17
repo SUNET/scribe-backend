@@ -1,5 +1,6 @@
 from auth.oidc import get_current_user
 from db.user import (
+    user_get_email,
     user_get_private_key,
     user_update,
 )
@@ -7,6 +8,7 @@ from db.user import (
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from utils.log import get_logger
+from utils.notifications import notifications
 from utils.settings import get_settings
 from utils.crypto import validate_private_key_password
 from utils.validators import UserUpdateRequest
@@ -96,7 +98,87 @@ async def set_user_info(
             and item.notifications.notify_on_user
         ):
             notifications_str += "user,"
+        if (
+            item.notifications.notify_on_quota is not None
+            and item.notifications.notify_on_quota
+        ):
+            notifications_str += "quota,"
+        if (
+            item.notifications.notify_on_weekly_report is not None
+            and item.notifications.notify_on_weekly_report
+        ):
+            notifications_str += "weekly_report,"
 
         user_update(user["user_id"], notifications_str=notifications_str)
 
     return JSONResponse(content={"result": {"status": "OK"}})
+
+
+@router.post("/me/test-notifications")
+async def test_notifications(
+    user: dict = Depends(get_current_user),
+) -> JSONResponse:
+    """
+    Temporary endpoint to test all email notification types.
+    Sends one of each notification type to the current user's email.
+
+    Parameters:
+        user (dict): The current user.
+
+    Returns:
+        JSONResponse: The result of the operation.
+    """
+
+    email = user_get_email(user["user_id"])
+
+    if not email:
+        return JSONResponse(
+            content={"error": "No email address configured"},
+            status_code=400,
+        )
+
+    username = user.get("username", "testuser")
+
+    notifications.send_email_verification(to_email=email)
+    notifications.send_transcription_finished(to_email=email)
+    notifications.send_transcription_failed(to_email=email)
+    notifications.send_job_deleted(to_email=email)
+    notifications.send_job_to_be_deleted(to_email=email)
+    notifications.send_new_user_created(to_email=email, username=username)
+    notifications.notification_send_account_activated(to_email=email)
+    notifications.send_quota_alert(
+        to_email=email,
+        customer_name="Test Customer",
+        usage_percent=96,
+        blocks_purchased=10,
+        minutes_included=40000,
+        minutes_consumed=38400,
+        remaining_minutes=1600,
+    )
+    notifications.send_group_quota_alert(
+        to_email=email,
+        group_name="Test Group",
+        usage_percent=97,
+        quota_minutes=5000,
+        used_minutes=4850,
+        remaining_minutes=150,
+    )
+    notifications.send_weekly_usage_report(
+        to_email=email,
+        customer_name="Test Customer",
+        total_users=25,
+        transcribed_files=142,
+        transcribed_minutes=8500,
+        transcribed_minutes_external=1200,
+        blocks_purchased=10,
+        blocks_consumed=2.13,
+        minutes_included=40000,
+        remaining_minutes=31500,
+        overage_minutes=0,
+    )
+
+    log.info(f"Test notifications queued for {email}")
+
+    return JSONResponse(
+        content={"result": {"status": "OK", "sent_to": email, "count": 10}}
+    )
