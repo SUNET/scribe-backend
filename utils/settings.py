@@ -222,7 +222,7 @@ This is an automated message from {branding_name}. If you need assistance, pleas
         "message": """\
 Hello,
 
-The block quota for customer {customer_name} has reached {usage_percent}% utilization.
+The block quota for account {customer_name} has reached {usage_percent}% utilization.
 
 Usage summary:
 - Blocks purchased: {blocks_purchased}
