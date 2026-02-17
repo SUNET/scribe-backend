@@ -86,6 +86,8 @@ def group_get(group_id: str, realm: str, user_id: Optional[str] = "") -> Optiona
                             Group.owner_user_id == user_id,
                             Group.realm.in_(
                                 [domain.strip() for domain in admin_domains.split(",")]
+                                if admin_domains
+                                else []
                             ),
                         )
                     )
