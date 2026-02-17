@@ -200,7 +200,7 @@ This is an automated message from Sunet Scribe. If you need assistance, please c
         "message": """\
 Hello,
 
-The block quota for customer {customer_name} has reached {usage_percent}% utilization.
+The block quota for account {customer_name} has reached {usage_percent}% utilization.
 
 Usage summary:
 - Blocks purchased: {blocks_purchased}
