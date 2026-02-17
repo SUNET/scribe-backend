@@ -220,10 +220,10 @@ This is an automated message from Sunet Scribe. If you need assistance, please c
         "message": """\
 Hello,
 
-The group "{group_name}" has reached {usage_percent}% of its transcription quota.
+The group "{group_name}" has reached {usage_percent}% of its transcription limit.
 
 Usage summary:
-- Quota: {quota_minutes} minutes
+- Limit: {quota_minutes} minutes
 - Used: {used_minutes} minutes
 - Remaining: {remaining_minutes} minutes
 
