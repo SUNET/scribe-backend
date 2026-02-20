@@ -153,10 +153,9 @@ async def auth(request: Request):
 
     token = await oauth.auth0.authorize_access_token(request)
     userinfo = token.get("userinfo")
+
     if not userinfo:
         raise ValueError("Failed to get userinfo from token")
-
-    request.session["id_token"] = token["access_token"]
 
     if "refresh_token" in token:
         request.session["refresh_token"] = token["refresh_token"]

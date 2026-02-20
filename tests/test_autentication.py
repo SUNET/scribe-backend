@@ -10,6 +10,7 @@ PUBLIC_ENDPOINTS = {
     "/api/logout",
     "/api/refresh",
     "/api/v1/status",
+    "/api/exchange",
 }
 
 
