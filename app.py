@@ -1,4 +1,6 @@
 import requests
+import secrets
+import time
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -32,6 +34,7 @@ from utils.settings import get_settings
 
 settings = get_settings()
 log = get_logger()
+auth_codes: dict[str, dict] = {}
 
 log.info(f"Starting API: {settings.API_TITLE} {settings.API_VERSION}")
 
@@ -77,7 +80,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 app.add_middleware(SessionMiddleware, settings.API_SECRET_KEY, https_only=False)
 app.include_router(transcriber_router, prefix=settings.API_PREFIX, tags=["transcriber"])
 app.include_router(job_router, prefix=settings.API_PREFIX, tags=["job"])
@@ -146,7 +148,7 @@ async def auth(request: Request):
         request (Request): The incoming HTTP request.
 
     Returns:
-        RedirectResponse: Redirects to the frontend with tokens.
+        RedirectResponse: Redirects to the frontend with a one-time auth code.
     """
 
     token = await oauth.auth0.authorize_access_token(request)
@@ -159,12 +161,53 @@ async def auth(request: Request):
     if "refresh_token" in token:
         request.session["refresh_token"] = token["refresh_token"]
 
-    url = f"{settings.OIDC_FRONTEND_URI}/?token={token['id_token']}"
+    now = time.time()
+    expired_codes = [c for c, v in auth_codes.items() if v["exp"] < now]
 
-    if "refresh_token" in token:
-        url += f"&refresh_token={token['refresh_token']}"
+    for code in expired_codes:
+        del auth_codes[code]
 
-    return RedirectResponse(url=url)
+    code = secrets.token_urlsafe(48)
+    auth_codes[code] = {
+        "id_token": token["id_token"],
+        "refresh_token": token.get("refresh_token"),
+        "exp": now + 60,
+    }
+
+    return RedirectResponse(url=f"{settings.OIDC_FRONTEND_URI}/?code={code}")
+
+
+@app.post("/api/exchange")
+async def exchange(request: Request):
+    """
+    Exchange a one-time auth code for tokens.
+
+    Parameters:
+        request (Request): The incoming HTTP request with JSON body {"code": "..."}.
+
+    Returns:
+        JSONResponse: The id_token and refresh_token.
+    """
+
+    body = await request.json()
+    code = body.get("code")
+
+    if not code or code not in auth_codes:
+        return JSONResponse(
+            status_code=400, content={"error": "Invalid or expired code."}
+        )
+
+    entry = auth_codes.pop(code)
+
+    if time.time() > entry["exp"]:
+        return JSONResponse(status_code=400, content={"error": "Code expired."})
+
+    return JSONResponse(
+        content={
+            "id_token": entry["id_token"],
+            "refresh_token": entry["refresh_token"],
+        }
+    )
 
 
 @app.get("/api/login")
