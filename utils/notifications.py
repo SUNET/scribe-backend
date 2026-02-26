@@ -93,7 +93,7 @@ class Notifications:
             server.login(settings.API_SMTP_USERNAME, settings.API_SMTP_PASSWORD)
 
             for email in to_emails:
-                mail_to_send = f"From: Sunet Scribe <{settings.API_SMTP_SENDER}>\nTo: {email}\nSubject: {subject}\n\n{message}"
+                mail_to_send = f"From: {settings.BRANDING_NAME} <{settings.API_SMTP_SENDER}>\nTo: {email}\nSubject: {subject}\n\n{message}"
                 server.sendmail(settings.API_SMTP_SENDER, to_emails, mail_to_send)
                 logger.info(f"Email sent to {', '.join(to_emails)}")
         except Exception as e:
@@ -113,7 +113,9 @@ class Notifications:
         self.add(
             to_emails=[to_email],
             subject=settings.NOTIFICATION_MAIL_UPDATED["subject"],
-            message=settings.NOTIFICATION_MAIL_UPDATED["message"],
+            message=settings.NOTIFICATION_MAIL_UPDATED["message"].format(
+                branding_name=settings.BRANDING_NAME
+            ),
         )
 
     def send_transcription_finished(self, to_email: str) -> None:
@@ -129,8 +131,13 @@ class Notifications:
 
         self.add(
             to_emails=[to_email],
-            subject=settings.NOTIFICATION_MAIL_TRANSCRIPTION_FINISHED["subject"],
-            message=settings.NOTIFICATION_MAIL_TRANSCRIPTION_FINISHED["message"],
+            subject=settings.NOTIFICATION_MAIL_TRANSCRIPTION_FINISHED["subject"].format(
+                branding_name=settings.BRANDING_NAME,
+            ),
+            message=settings.NOTIFICATION_MAIL_TRANSCRIPTION_FINISHED["message"].format(
+            branding_name=settings.BRANDING_NAME,
+            branding_frontend_url=settings.BRANDING_FRONTEND_URL,
+            ),
         )
 
     def send_transcription_failed(self, to_email: str) -> None:
@@ -147,7 +154,9 @@ class Notifications:
         self.add(
             to_emails=[to_email],
             subject=settings.NOTIFICATION_MAIL_TRANSCRIPTION_FAILED["subject"],
-            message=settings.NOTIFICATION_MAIL_TRANSCRIPTION_FAILED["message"],
+            message=settings.NOTIFICATION_MAIL_TRANSCRIPTION_FAILED["message"].format(
+            branding_name=settings.BRANDING_NAME,
+            ),
         )
 
     def send_job_deleted(self, to_email: str) -> None:
@@ -164,7 +173,9 @@ class Notifications:
         self.add(
             to_emails=[to_email],
             subject=settings.NOTIFICATION_MAIL_TRANSCRIPTION_DELETED["subject"],
-            message=settings.NOTIFICATION_MAIL_TRANSCRIPTION_DELETED["message"],
+            message=settings.NOTIFICATION_MAIL_TRANSCRIPTION_DELETED["message"].format(
+            branding_name=settings.BRANDING_NAME,
+            ),
         )
 
     def send_job_to_be_deleted(self, to_email: str) -> None:
@@ -181,7 +192,9 @@ class Notifications:
         self.add(
             to_emails=[to_email],
             subject=settings.NOTIFICATION_MAIL_TRANSCRIPTION_TO_BE_DELETED["subject"],
-            message=settings.NOTIFICATION_MAIL_TRANSCRIPTION_TO_BE_DELETED["message"],
+            message=settings.NOTIFICATION_MAIL_TRANSCRIPTION_TO_BE_DELETED["message"].format(
+            branding_name=settings.BRANDING_NAME,
+            ),
         )
 
     def send_new_user_created(self, to_email: str, username: str) -> None:
@@ -199,7 +212,9 @@ class Notifications:
             to_emails=[to_email],
             subject=settings.NOTIFICATION_MAIL_NEW_USER_CREATED["subject"],
             message=settings.NOTIFICATION_MAIL_NEW_USER_CREATED["message"].format(
-                username=username
+                username=username,
+                branding_name=settings.BRANDING_NAME,
+                branding_admin_url=settings.BRANDING_ADMIN_URL,
             ),
         )
 
@@ -268,8 +283,12 @@ class Notifications:
 
         self.add(
             to_emails=[to_email],
-            subject=settings.NOTIFICATION_MAIL_ACCOUNT_ACTIVATED["subject"],
-            message=settings.NOTIFICATION_MAIL_ACCOUNT_ACTIVATED["message"],
+            subject=settings.NOTIFICATION_MAIL_ACCOUNT_ACTIVATED["subject"].format(
+            branding_name=settings.BRANDING_NAME,
+            ),
+            message=settings.NOTIFICATION_MAIL_ACCOUNT_ACTIVATED["message"].format(
+            branding_name=settings.BRANDING_NAME,
+            ),
         )
 
 
