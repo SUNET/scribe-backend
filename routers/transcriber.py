@@ -38,6 +38,22 @@ api_file_storage_dir = settings.API_FILE_STORAGE_DIR
 logger = get_logger()
 
 
+def decrypt_filename(job: dict, private_key) -> dict:
+    """
+    Try to decrypt the filename in a job dict, falling back to the raw value.
+    """
+
+    if not job.get("filename"):
+        return job
+
+    try:
+        job["filename"] = decrypt_string(private_key, job["filename"])
+    except Exception:
+        pass
+
+    return job
+
+
 @router.get("/transcriber")
 async def transcribe(
     request: Request,
@@ -64,6 +80,30 @@ async def transcribe(
     else:
         res = job_get_all(user["user_id"])
 
+    # Try to decrypt filenames
+    try:
+        data = await request.json()
+        encryption_password = data.get("encryption_password", "")
+    except Exception:
+        encryption_password = ""
+
+    private_key = None
+
+    if encryption_password:
+        try:
+            raw_private_key = user_get_private_key(user["user_id"])
+            private_key = deserialize_private_key_from_pem(
+                raw_private_key, encryption_password
+            )
+        except Exception:
+            private_key = None
+
+    if private_key:
+        if isinstance(res, dict) and "jobs" in res:
+            res["jobs"] = [decrypt_filename(job, private_key) for job in res["jobs"]]
+        elif isinstance(res, dict) and "uuid" in res:
+            res = decrypt_filename(res, private_key)
+
     return JSONResponse(content={"result": res})
 
 
@@ -87,10 +127,13 @@ async def transcribe_file(
         JSONResponse: The job status.
     """
 
+    user_public_key = user_get_public_key(user["user_id"])
+    user_public_key = deserialize_public_key_from_pem(user_public_key)
+
     job = job_create(
         user_id=user["user_id"],
         job_type=JobType.TRANSCRIPTION,
-        filename=file.filename,
+        filename=encrypt_string(user_public_key, file.filename),
     )
 
     if not (api_user := user_get(username="api_user")):
@@ -227,6 +270,19 @@ async def update_transcription_status(
             content={"result": {"error": "Job not found"}}, status_code=404
         )
 
+    # Try to decrypt the filename for the response
+    filename = job["filename"]
+
+    try:
+        raw_private_key = user_get_private_key(user["user_id"])
+        if item.encryption_password:
+            deserialized_key = deserialize_private_key_from_pem(
+                raw_private_key, item.encryption_password
+            )
+            filename = decrypt_string(deserialized_key, filename)
+    except Exception:
+        pass
+
     return JSONResponse(
         content={
             "result": {
@@ -234,7 +290,7 @@ async def update_transcription_status(
                 "user_id": user["user_id"],
                 "status": job["status"],
                 "job_type": job["job_type"],
-                "filename": job["filename"],
+                "filename": filename,
                 "language": job["language"],
                 "model_type": job["model_type"],
                 "output_format": job["output_format"],

@@ -6,6 +6,7 @@ class TranscriptionStatusPut(BaseModel):
     language: Optional[str] = None
     speakers: Optional[int] = 0
     output_format: Optional[str] = None
+    encryption_password: Optional[str] = None
 
 
 class TranscriptionResultPut(BaseModel):
