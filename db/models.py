@@ -659,3 +659,19 @@ class NotificationsSent(SQLModel, table=True):
             "sent_at": str(self.sent_at),
             "uuid": self.uuid,
         }
+
+
+class PageView(SQLModel, table=True):
+    """
+    Model representing anonymous page view events for analytics.
+    """
+
+    __tablename__ = "page_views"
+
+    id: Optional[int] = Field(default=None, primary_key=True, description="Primary key")
+    path: str = Field(index=True, description="Page path that was visited")
+    timestamp: datetime = Field(
+        default_factory=datetime.utcnow,
+        index=True,
+        description="Timestamp of the page view",
+    )
