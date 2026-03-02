@@ -80,6 +80,79 @@ def get_recent_views(limit: int = 50) -> list[dict]:
         return [{"path": r.path, "timestamp": str(r.timestamp)} for r in rows]
 
 
+def get_hourly_heatmap(days: int = 30) -> list[dict]:
+    """Views grouped by day-of-week and hour-of-day for a heatmap."""
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    with get_session() as session:
+        rows = (
+            session.query(
+                func.extract("dow", PageView.timestamp).label("dow"),
+                func.extract("hour", PageView.timestamp).label("hour"),
+                func.count().label("views"),
+            )
+            .filter(PageView.timestamp >= cutoff)
+            .group_by("dow", "hour")
+            .all()
+        )
+        return [
+            {"dow": int(r.dow), "hour": int(r.hour), "views": r.views}
+            for r in rows
+        ]
+
+
+def get_hourly_distribution(days: int = 30) -> list[dict]:
+    """Total views per hour-of-day."""
+    cutoff = datetime.utcnow() - timedelta(days=days)
+    with get_session() as session:
+        rows = (
+            session.query(
+                func.extract("hour", PageView.timestamp).label("hour"),
+                func.count().label("views"),
+            )
+            .filter(PageView.timestamp >= cutoff)
+            .group_by("hour")
+            .order_by("hour")
+            .all()
+        )
+        return [{"hour": int(r.hour), "views": r.views} for r in rows]
+
+
+def get_week_over_week() -> dict:
+    """Compare this week's views vs last week's."""
+    now = datetime.utcnow()
+    this_week_start = now - timedelta(days=now.weekday())
+    this_week_start = this_week_start.replace(hour=0, minute=0, second=0, microsecond=0)
+    last_week_start = this_week_start - timedelta(days=7)
+
+    with get_session() as session:
+        this_week = (
+            session.query(func.count(PageView.id))
+            .filter(PageView.timestamp >= this_week_start)
+            .scalar()
+            or 0
+        )
+        last_week = (
+            session.query(func.count(PageView.id))
+            .filter(
+                PageView.timestamp >= last_week_start,
+                PageView.timestamp < this_week_start,
+            )
+            .scalar()
+            or 0
+        )
+
+        if last_week > 0:
+            change_pct = round(((this_week - last_week) / last_week) * 100, 1)
+        else:
+            change_pct = None
+
+        return {
+            "this_week": this_week,
+            "last_week": last_week,
+            "change_pct": change_pct,
+        }
+
+
 def get_total_stats() -> dict:
     """Aggregate stats for summary cards."""
     cutoff = datetime.utcnow() - timedelta(days=30)
