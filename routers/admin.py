@@ -33,6 +33,9 @@ from db.analytics import (
     get_page_views_summary,
     get_views_per_day,
     get_recent_views,
+    get_hourly_heatmap,
+    get_hourly_distribution,
+    get_week_over_week,
     get_total_stats,
 )
 from utils.log import get_logger
@@ -726,6 +729,47 @@ async def analytics_recent(
     if not admin_user.get("bofh"):
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
     return JSONResponse(content={"result": get_recent_views(limit=limit)})
+
+
+@router.get("/admin/analytics/heatmap")
+async def analytics_heatmap(
+    request: Request,
+    admin_user: dict = Depends(get_current_admin_user),
+    days: int = 30,
+) -> JSONResponse:
+    """
+    Get views grouped by day-of-week and hour-of-day for heatmap. BOFH only.
+    """
+    if not admin_user.get("bofh"):
+        return JSONResponse(content={"error": "User not authorized"}, status_code=403)
+    return JSONResponse(content={"result": get_hourly_heatmap(days=days)})
+
+
+@router.get("/admin/analytics/hourly")
+async def analytics_hourly(
+    request: Request,
+    admin_user: dict = Depends(get_current_admin_user),
+    days: int = 30,
+) -> JSONResponse:
+    """
+    Get views per hour-of-day. BOFH only.
+    """
+    if not admin_user.get("bofh"):
+        return JSONResponse(content={"error": "User not authorized"}, status_code=403)
+    return JSONResponse(content={"result": get_hourly_distribution(days=days)})
+
+
+@router.get("/admin/analytics/wow")
+async def analytics_week_over_week(
+    request: Request,
+    admin_user: dict = Depends(get_current_admin_user),
+) -> JSONResponse:
+    """
+    Get week-over-week comparison. BOFH only.
+    """
+    if not admin_user.get("bofh"):
+        return JSONResponse(content={"error": "User not authorized"}, status_code=403)
+    return JSONResponse(content={"result": get_week_over_week()})
 
 
 @router.get("/admin/analytics/stats")
