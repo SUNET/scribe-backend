@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from sqlalchemy import func, cast, Date
+from sqlalchemy import func
 from db.models import PageView
 from db.session import get_session
 
@@ -18,12 +18,12 @@ def get_page_views(days: int = 30) -> list[dict]:
         rows = (
             session.query(
                 PageView.path,
-                cast(PageView.timestamp, Date).label("date"),
+                func.date(PageView.timestamp).label("date"),
                 func.count().label("views"),
             )
             .filter(PageView.timestamp >= cutoff)
-            .group_by(PageView.path, cast(PageView.timestamp, Date))
-            .order_by(cast(PageView.timestamp, Date))
+            .group_by(PageView.path, func.date(PageView.timestamp))
+            .order_by(func.date(PageView.timestamp))
             .all()
         )
         return [{"path": r.path, "date": str(r.date), "views": r.views} for r in rows]
@@ -57,12 +57,12 @@ def get_views_per_day(days: int = 30) -> list[dict]:
     with get_session() as session:
         rows = (
             session.query(
-                cast(PageView.timestamp, Date).label("date"),
+                func.date(PageView.timestamp).label("date"),
                 func.count().label("views"),
             )
             .filter(PageView.timestamp >= cutoff)
-            .group_by(cast(PageView.timestamp, Date))
-            .order_by(cast(PageView.timestamp, Date))
+            .group_by(func.date(PageView.timestamp))
+            .order_by(func.date(PageView.timestamp))
             .all()
         )
         return [{"date": str(r.date), "views": r.views} for r in rows]
