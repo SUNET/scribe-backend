@@ -135,8 +135,8 @@ class Notifications:
                 branding_name=settings.BRANDING_NAME,
             ),
             message=settings.NOTIFICATION_MAIL_TRANSCRIPTION_FINISHED["message"].format(
-            branding_name=settings.BRANDING_NAME,
-            branding_frontend_url=settings.BRANDING_FRONTEND_URL,
+            	branding_name=settings.BRANDING_NAME,
+            	branding_frontend_url=settings.BRANDING_FRONTEND_URL,
             ),
         )
 
@@ -155,7 +155,7 @@ class Notifications:
             to_emails=[to_email],
             subject=settings.NOTIFICATION_MAIL_TRANSCRIPTION_FAILED["subject"],
             message=settings.NOTIFICATION_MAIL_TRANSCRIPTION_FAILED["message"].format(
-            branding_name=settings.BRANDING_NAME,
+            	branding_name=settings.BRANDING_NAME,
             ),
         )
 
@@ -174,7 +174,7 @@ class Notifications:
             to_emails=[to_email],
             subject=settings.NOTIFICATION_MAIL_TRANSCRIPTION_DELETED["subject"],
             message=settings.NOTIFICATION_MAIL_TRANSCRIPTION_DELETED["message"].format(
-            branding_name=settings.BRANDING_NAME,
+            	branding_name=settings.BRANDING_NAME,
             ),
         )
 
@@ -193,7 +193,7 @@ class Notifications:
             to_emails=[to_email],
             subject=settings.NOTIFICATION_MAIL_TRANSCRIPTION_TO_BE_DELETED["subject"],
             message=settings.NOTIFICATION_MAIL_TRANSCRIPTION_TO_BE_DELETED["message"].format(
-            branding_name=settings.BRANDING_NAME,
+            	branding_name=settings.BRANDING_NAME,
             ),
         )
 
@@ -284,10 +284,10 @@ class Notifications:
         self.add(
             to_emails=[to_email],
             subject=settings.NOTIFICATION_MAIL_ACCOUNT_ACTIVATED["subject"].format(
-            branding_name=settings.BRANDING_NAME,
+            	branding_name=settings.BRANDING_NAME,
             ),
             message=settings.NOTIFICATION_MAIL_ACCOUNT_ACTIVATED["message"].format(
-            branding_name=settings.BRANDING_NAME,
+            	branding_name=settings.BRANDING_NAME,
             ),
         )
 
