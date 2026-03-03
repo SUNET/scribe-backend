@@ -46,6 +46,11 @@ class Settings(BaseSettings):
     API_SMTP_SENDER: str = ""
     API_SMTP_SSL: bool = False
 
+    # Branding
+    BRANDING_NAME: str = "Sunet Scribe"
+    BRANDING_FRONTEND_URL: str = "https://scribe.sunet.se"
+    BRANDING_ADMIN_URL: str = "https://scribe.sunet.se/admin"
+
     # OIDC configuration.
     OIDC_CLIENT_ID: str = ""
     OIDC_SCOPE: list[str] = []
@@ -73,29 +78,29 @@ class Settings(BaseSettings):
         "message": """\
 Hello,
 
-Your e-mail address have been updated in Sunet Scribe.
+Your e-mail address have been updated in {branding_name}.
 If you did not perform this action, please contact support.
 
 Best regards,
-Sunet Scribe
+{branding_name}
 
-This is an automated message from Sunet Scribe. If you need assistance, please contact your local support.
+This is an automated message from {branding_name}. If you need assistance, please contact your local support.
 """,
     }
 
     NOTIFICATION_MAIL_TRANSCRIPTION_FINISHED: dict = {
-        "subject": "Your transcription is ready in Sunet Scribe",
+        "subject": "Your transcription is ready in {branding_name}",
         "message": """\
 Hello,
 
-Your transcription job is now complete and ready to view in Sunet Scribe.
+Your transcription job is now complete and ready to view in {branding_name}.
 You can log in to the service to review, edit, or export your transcription:
-https://scribe.sunet.se
+{branding_frontend_url}
 
 Best regards,
-Sunet Scribe
+{branding_name}
 
-This is an automated message from Sunet Scribe. If you need assistance, please contact your local support.
+This is an automated message from {branding_name}. If you need assistance, please contact your local support.
 """,
     }
 
@@ -106,16 +111,16 @@ Hello,
 
 Unfortunately, your transcription job could not be completed.
 
-You can try submitting the job again via Sunet Scribe. In many cases, temporary issues are resolved automatically.
+You can try submitting the job again via {branding_name}. In many cases, temporary issues are resolved automatically.
 
 If the problem persists, please contact your local support.
 
 No transcription data has been produced as a result of this job.
 
 Best regards,
-Sunet Scribe
+{branding_name}
 
-This is an automated message from Sunet Scribe. If you need assistance, please contact your local support.
+This is an automated message from {branding_name}. If you need assistance, please contact your local support.
 """,
     }
 
@@ -124,16 +129,16 @@ This is an automated message from Sunet Scribe. If you need assistance, please c
         "message": """\
 Hello,
 
-One or more of your transcription jobs have been deleted from Sunet Scribe because they were older than 7 days.
+One or more of your transcription jobs have been deleted from {branding_name} because they were older than 7 days.
 
-Sunet Scribe automatically removes transcription jobs after 7 days for security and storage reasons.
+{branding_name} automatically removes transcription jobs after 7 days for security and storage reasons.
 
 The transcription and associated files are no longer available and cannot be recovered.
 
 Best regards,
-Sunet Scribe
+{branding_name}
 
-This is an automated message from Sunet Scribe. If you need assistance, please contact your local support.
+This is an automated message from {branding_name}. If you need assistance, please contact your local support.
 """,
     }
 
@@ -142,18 +147,18 @@ This is an automated message from Sunet Scribe. If you need assistance, please c
         "message": """\
 Hello,
 
-One or more of your transcription jobs in Sunet Scribe are scheduled for deletion in 24 hours.
+One or more of your transcription jobs in {branding_name} are scheduled for deletion in 24 hours.
 
 Transcription jobs are automatically removed after 7 days for security and storage reasons.
 
-If you wish to keep the transcription, please log in to Sunet Scribe and export the transcription results before they are deleted.
+If you wish to keep the transcription, please log in to {branding_name} and export the transcription results before they are deleted.
 
 After deletion, the transcription and associated files cannot be recovered.
 
 Best regards,
-Sunet Scribe
+{branding_name}
 
-This is an automated message from Sunet Scribe. If you need assistance, please contact your local support.
+This is an automated message from {branding_name}. If you need assistance, please contact your local support.
 """,
     }
 
@@ -162,36 +167,36 @@ This is an automated message from Sunet Scribe. If you need assistance, please c
         "message": """\
 Hello,
 
-A new user {username} has been created in Sunet Scribe.
+A new user {username} has been created in {branding_name}.
 The account is not yet active and requires approval by a local administrator before the user can access the service.
 
-Please review and activate the new user via the Sunet Scribe administration interface:
-https://scribe.sunet.se/admin
+Please review and activate the new user via the {branding_name} administration interface:
+{branding_admin_url}
 
 No user data can been uploaded and no processing can take place until the account is activated.
 
 Best regards,
-Sunet Scribe
+{branding_name}
 
-This is an automated message from Sunet Scribe. If you need assistance, please contact your local support.
+This is an automated message from {branding_name}. If you need assistance, please contact your local support.
 """,
     }
 
     NOTIFICATION_MAIL_ACCOUNT_ACTIVATED: dict = {
-        "subject": "Your Sunet Scribe account has been activated",
+        "subject": "Your {branding_name} account has been activated",
         "message": """\
 Hello,
 
-Your account in Sunet Scribe has now been activated by an administrator.
+Your account in {branding_name} has now been activated by an administrator.
 
 You can log in to the service and start using it at any time.
 
 Please note that uploaded files and transcriptions are stored temporarily and are automatically removed after a limited retention period. Make sure to download any content you wish to keep.
 
 Best regards,
-Sunet Scribe
+{branding_name}
 
-This is an automated message from Sunet Scribe. If you need assistance, please contact your local support.
+This is an automated message from {branding_name}. If you need assistance, please contact your local support.
 """,
     }
 
