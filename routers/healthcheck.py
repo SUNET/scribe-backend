@@ -97,7 +97,9 @@ async def get_status() -> JSONResponse:
             if now - last_seen < 120:
                 online_count += 1
                 gpu = stats[-1].get("gpu_usage", 0)
-                if isinstance(gpu, list):
+                if isinstance(gpu, dict):
+                    gpu = max(gpu.values()) if gpu else 0
+                elif isinstance(gpu, list):
                     gpu = max(gpu) if gpu else 0
                 workers_detail[f"worker-{idx}"] = {"busy": gpu > 0}
 

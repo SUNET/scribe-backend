@@ -4,6 +4,7 @@ from typing import List, Optional
 from uuid import uuid4
 
 from pydantic import BaseModel
+from sqlalchemy import Index
 from sqlalchemy.types import Enum as SQLAlchemyEnum
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -203,6 +204,9 @@ class Job(SQLModel, table=True):
     """
 
     __tablename__ = "jobs"
+    __table_args__ = (
+        Index("ix_jobs_user_id_job_type", "user_id", "job_type"),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True, description="Primary key")
     uuid: str = Field(
