@@ -1,4 +1,4 @@
-# Copyright (c) 2025-2025 Sunet.
+# Copyright (c) 2025-2026 Sunet.
 # Contributor: Kristofer Hallin
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
