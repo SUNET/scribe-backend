@@ -1,6 +1,16 @@
 # scribe-backend
 
-Backend built on FastAPI for the SUNET transcription service (Sunet Scribe).
+Backend built on FastAPI for the Sunet transcription service (Sunet Scribe).
+
+## Author
+
+This project is developed by [Sunet](https://www.sunet.se). Contributor: Kristofer Hallin.
+
+## License
+
+This project is licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) for details.
+
+Copyright (c) 2025-2025 Sunet. Contributor: Kristofer Hallin.
 
 ## Features
 
@@ -155,7 +165,3 @@ scribe-backend/
 ├── utils/              # Utilities (crypto, logging, settings)
 └── tests/              # Test files
 ```
-
-## License
-
-See [LICENSE](LICENSE) for details.
