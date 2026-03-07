@@ -44,6 +44,17 @@ from db.customer import (
     export_customers_to_csv,
 )
 
+from db.analytics import (
+    log_page_view,
+    get_page_views,
+    get_page_views_summary,
+    get_views_per_day,
+    get_recent_views,
+    get_hourly_heatmap,
+    get_hourly_distribution,
+    get_week_over_week,
+    get_total_stats,
+)
 from utils.log import get_logger
 
 from utils.settings import get_settings
@@ -665,3 +676,127 @@ async def export_customers_csv(
         media_type="text/csv",
         headers={"Content-Disposition": 'attachment; filename="customers_export.csv"'},
     )
+
+
+@router.post("/admin/analytics/log")
+async def analytics_log(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+) -> JSONResponse:
+    """
+    Log an anonymous page view.
+    """
+    body = await request.json()
+    path = body.get("path", "")
+    if path:
+        log_page_view(path)
+    return JSONResponse(content={"result": "ok"})
+
+
+@router.get("/admin/analytics/views")
+async def analytics_views(
+    request: Request,
+    admin_user: dict = Depends(get_current_admin_user),
+    days: int = 30,
+) -> JSONResponse:
+    """
+    Get page views grouped by path and day. BOFH only.
+    """
+    if not admin_user.get("bofh"):
+        return JSONResponse(content={"error": "User not authorized"}, status_code=403)
+    return JSONResponse(content={"result": get_page_views(days=days)})
+
+
+@router.get("/admin/analytics/summary")
+async def analytics_summary(
+    request: Request,
+    admin_user: dict = Depends(get_current_admin_user),
+) -> JSONResponse:
+    """
+    Get total views per page (all time and last 30 days). BOFH only.
+    """
+    if not admin_user.get("bofh"):
+        return JSONResponse(content={"error": "User not authorized"}, status_code=403)
+    return JSONResponse(content={"result": get_page_views_summary()})
+
+
+@router.get("/admin/analytics/daily")
+async def analytics_daily(
+    request: Request,
+    admin_user: dict = Depends(get_current_admin_user),
+    days: int = 30,
+) -> JSONResponse:
+    """
+    Get total views per day. BOFH only.
+    """
+    if not admin_user.get("bofh"):
+        return JSONResponse(content={"error": "User not authorized"}, status_code=403)
+    return JSONResponse(content={"result": get_views_per_day(days=days)})
+
+
+@router.get("/admin/analytics/recent")
+async def analytics_recent(
+    request: Request,
+    admin_user: dict = Depends(get_current_admin_user),
+    limit: int = 50,
+) -> JSONResponse:
+    """
+    Get most recent page views. BOFH only.
+    """
+    if not admin_user.get("bofh"):
+        return JSONResponse(content={"error": "User not authorized"}, status_code=403)
+    return JSONResponse(content={"result": get_recent_views(limit=limit)})
+
+
+@router.get("/admin/analytics/heatmap")
+async def analytics_heatmap(
+    request: Request,
+    admin_user: dict = Depends(get_current_admin_user),
+    days: int = 30,
+) -> JSONResponse:
+    """
+    Get views grouped by day-of-week and hour-of-day for heatmap. BOFH only.
+    """
+    if not admin_user.get("bofh"):
+        return JSONResponse(content={"error": "User not authorized"}, status_code=403)
+    return JSONResponse(content={"result": get_hourly_heatmap(days=days)})
+
+
+@router.get("/admin/analytics/hourly")
+async def analytics_hourly(
+    request: Request,
+    admin_user: dict = Depends(get_current_admin_user),
+    days: int = 30,
+) -> JSONResponse:
+    """
+    Get views per hour-of-day. BOFH only.
+    """
+    if not admin_user.get("bofh"):
+        return JSONResponse(content={"error": "User not authorized"}, status_code=403)
+    return JSONResponse(content={"result": get_hourly_distribution(days=days)})
+
+
+@router.get("/admin/analytics/wow")
+async def analytics_week_over_week(
+    request: Request,
+    admin_user: dict = Depends(get_current_admin_user),
+) -> JSONResponse:
+    """
+    Get week-over-week comparison. BOFH only.
+    """
+    if not admin_user.get("bofh"):
+        return JSONResponse(content={"error": "User not authorized"}, status_code=403)
+    return JSONResponse(content={"result": get_week_over_week()})
+
+
+@router.get("/admin/analytics/stats")
+async def analytics_stats(
+    request: Request,
+    admin_user: dict = Depends(get_current_admin_user),
+) -> JSONResponse:
+    """
+    Get aggregate analytics stats for summary cards. BOFH only.
+    """
+    if not admin_user.get("bofh"):
+        return JSONResponse(content={"error": "User not authorized"}, status_code=403)
+    return JSONResponse(content={"result": get_total_stats()})
