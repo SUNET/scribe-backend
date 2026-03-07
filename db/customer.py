@@ -562,6 +562,10 @@ def export_customers_to_csv(admin_user: dict) -> str:
     if not (customers := customer_get_all(admin_user)):
         return ""
 
+    now = datetime.now()
+    this_month = now.strftime("%y-%m")
+    last_month = (now.replace(day=1) - timedelta(days=1)).strftime("%y-%m")
+
     # Define CSV headers
     fieldnames = [
         "Customer Name",
@@ -573,18 +577,18 @@ def export_customers_to_csv(admin_user: dict) -> str:
         "Blocks Purchased",
         "Realms",
         "Total Users",
-        "Files (This Month)",
-        "Files (Last Month)",
-        "Total minutes (This Month)",
-        "Total minutes (Last Month)",
-        "Minutes via Sunet Play (This Month)",
-        "Minutes via Sunet Play (Last Month)",
-        "Minutes via web interface and API (This Month)",
-        "Minutes via web interface and API (Last Month)",
+        f"Files ({this_month})",
+        f"Files ({last_month})",
+        f"Total minutes ({this_month})",
+        f"Total minutes ({last_month})",
+        f"Minutes via Sunet Play ({this_month})",
+        f"Minutes via Sunet Play ({last_month})",
+        f"Minutes via web interface and API ({this_month})",
+        f"Minutes via web interface and API ({last_month})",
         "Blocks Consumed",
         "Minutes Included",
         "Overage Minutes",
-        "Overage Minutes (Last Month)",
+        f"Overage Minutes ({last_month})",
         "Remaining Minutes",
         "Notes",
         "Created At",
@@ -606,28 +610,28 @@ def export_customers_to_csv(admin_user: dict) -> str:
             "Blocks Purchased": customer.get("blocks_purchased", 0),
             "Realms": customer.get("realms", ""),
             "Total Users": stats.get("total_users", 0),
-            "Files (This Month)": stats.get("transcribed_files", 0),
-            "Files (Last Month)": stats.get("transcribed_files_last_month", 0),
-            "Total minutes (This Month)": stats.get("total_transcribed_minutes", 0),
-            "Total minutes (Last Month)": stats.get(
+            f"Files ({this_month})": stats.get("transcribed_files", 0),
+            f"Files ({last_month})": stats.get("transcribed_files_last_month", 0),
+            f"Total minutes ({this_month})": stats.get("total_transcribed_minutes", 0),
+            f"Total minutes ({last_month})": stats.get(
                 "total_transcribed_minutes_last_month", 0
             ),
-            "Minutes via Sunet Play (This Month)": stats.get(
+            f"Minutes via Sunet Play ({this_month})": stats.get(
                 "transcribed_minutes_external", 0
             ),
-            "Minutes via Sunet Play (Last Month)": stats.get(
+            f"Minutes via Sunet Play ({last_month})": stats.get(
                 "transcribed_minutes_external_last_month", 0
             ),
-            "Minutes via web interface and API (This Month)": stats.get(
+            f"Minutes via web interface and API ({this_month})": stats.get(
                 "transcribed_minutes", 0
             ),
-            "Minutes via web interface and API (Last Month)": stats.get(
+            f"Minutes via web interface and API ({last_month})": stats.get(
                 "transcribed_minutes_last_month", 0
             ),
             "Blocks Consumed": stats.get("blocks_consumed", 0),
             "Minutes Included": stats.get("minutes_included", 0),
             "Overage Minutes": stats.get("overage_minutes", 0),
-            "Overage Minutes (Last Month)": stats.get("overage_minutes_last_month", 0),
+            f"Overage Minutes ({last_month})": stats.get("overage_minutes_last_month", 0),
             "Remaining Minutes": stats.get("remaining_minutes", 0),
             "Notes": customer.get("notes", ""),
             "Created At": customer.get("created_at", ""),
