@@ -168,6 +168,9 @@ class JobResult(SQLModel, table=True):
     """
 
     __tablename__ = "job_results"
+    __table_args__ = (
+        Index("ix_job_results_user_id_job_id", "user_id", "job_id"),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True, description="Primary key")
     job_id: str = Field(
@@ -223,6 +226,9 @@ class Job(SQLModel, table=True):
     __tablename__ = "jobs"
     __table_args__ = (
         Index("ix_jobs_user_id_job_type", "user_id", "job_type"),
+        Index("ix_jobs_status_user_id", "status", "user_id"),
+        Index("ix_jobs_deletion_date_status", "deletion_date", "status"),
+        Index("ix_jobs_created_at_status", "created_at", "status"),
     )
 
     id: Optional[int] = Field(default=None, primary_key=True, description="Primary key")
@@ -684,6 +690,9 @@ class PageView(SQLModel, table=True):
     """
 
     __tablename__ = "page_views"
+    __table_args__ = (
+        Index("ix_page_views_timestamp_path", "timestamp", "path"),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True, description="Primary key")
     path: str = Field(index=True, description="Page path that was visited")

@@ -29,6 +29,7 @@ from db.models import (
 )
 from db.session import get_session
 from pathlib import Path
+from sqlalchemy import or_
 from typing import Optional
 from utils.log import get_logger
 from utils.settings import get_settings
@@ -355,18 +356,62 @@ def job_cleanup() -> None:
     """
 
     with get_session() as session:
-        # Cleanup jobs older than deletion date
-        jobs_to_cleanup = (
-            session.query(Job).filter(Job.deletion_date <= datetime.now()).all()
+        now = datetime.now()
+
+        # Fetch all jobs relevant to cleanup in a single query
+        all_cleanup_jobs = (
+            session.query(Job)
+            .filter(
+                or_(
+                    Job.deletion_date <= now + timedelta(days=1),
+                    Job.created_at <= now - timedelta(days=62),
+                )
+            )
+            .all()
         )
 
+        # Categorize jobs
+        jobs_to_cleanup = []
+        jobs_to_delete = []
+        jobs_to_notify = []
+
+        for job in all_cleanup_jobs:
+            if job.created_at <= now - timedelta(days=62):
+                jobs_to_delete.append(job)
+            elif job.deletion_date and job.deletion_date <= now:
+                jobs_to_cleanup.append(job)
+            elif (
+                job.deletion_date
+                and job.deletion_date <= now + timedelta(days=1)
+                and job.status != JobStatusEnum.DELETED
+            ):
+                jobs_to_notify.append(job)
+
+        # Batch-load users for notification jobs
+        notify_user_ids = set()
+        for job in jobs_to_cleanup:
+            if job.status != JobStatusEnum.DELETED:
+                notify_user_ids.add(job.user_id)
+        for job in jobs_to_notify:
+            notify_user_ids.add(job.user_id)
+
+        user_map = {}
+        if notify_user_ids:
+            users = (
+                session.query(User)
+                .filter(User.user_id.in_(notify_user_ids))
+                .all()
+            )
+            user_map = {u.user_id: u for u in users}
+
+        # Cleanup jobs older than deletion date
         for job in jobs_to_cleanup:
             job_remove(job.uuid)
 
             if job.status == JobStatusEnum.DELETED:
                 continue
 
-            user = session.query(User).filter(User.user_id == job.user_id).first()
+            user = user_map.get(job.user_id)
 
             if not user or not user.notifications:
                 continue
@@ -392,30 +437,15 @@ def job_cleanup() -> None:
             )
 
         # Permanently delete all jobs older than ~2 months
-        jobs_to_delete = (
-            session.query(Job)
-            .filter(Job.created_at <= datetime.now() - timedelta(days=62))
-            .all()
-        )
-
         for job in jobs_to_delete:
-            # Nuke the record since we don't need it anymore.
-            # Results etc should have been deleted already.
             log.info(
                 f"Permanently deleting job {job.uuid} created at {job.created_at} from database."
             )
             session.delete(job)
 
         # Notify about jobs that will be deleted tomorrow
-        jobs_to_notify = (
-            session.query(Job)
-            .filter(Job.deletion_date <= datetime.now() + timedelta(days=1))
-            .filter(Job.status != JobStatusEnum.DELETED)
-            .all()
-        )
-
         for job in jobs_to_notify:
-            user = session.query(User).filter(User.user_id == job.user_id).first()
+            user = user_map.get(job.user_id)
 
             if not user or not user.notifications:
                 continue
@@ -435,7 +465,6 @@ def job_cleanup() -> None:
                 f"Sending transcription deletion warning notification to user {user.user_id} for job {job.uuid}."
             )
 
-            # Send the notification
             notifications.send_job_to_be_deleted(user.email)
             notifications.notification_sent_record_add(
                 user.user_id, job.uuid, "deletion_warning"

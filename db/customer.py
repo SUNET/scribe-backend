@@ -21,7 +21,7 @@ import io
 from datetime import datetime, timedelta
 
 from db.job import job_get_all
-from db.models import Customer, User
+from db.models import Customer, Job, JobType, User
 from db.session import get_session
 from typing import Optional
 from utils.log import get_logger
@@ -173,18 +173,12 @@ def customer_get_all(admin_user: dict) -> list[dict]:
             return [customer.as_dict() for customer in customers]
         elif admin_user["admin"]:
             realm = admin_user["realm"]
-            customers = session.query(Customer).all()
-            matching_customers = []
-
-            for customer in customers:
-                customer_realms = [
-                    r.strip() for r in customer.realms.split(",") if r.strip()
-                ]
-
-                if realm in customer_realms:
-                    matching_customers.append(customer.as_dict())
-
-            return matching_customers
+            customers = (
+                session.query(Customer)
+                .filter(Customer.realms.like(f"%{realm}%"))
+                .all()
+            )
+            return [customer.as_dict() for customer in customers]
 
         else:
             return []
@@ -369,44 +363,49 @@ def customer_get_statistics(customer_id: str) -> dict:
         last_day_prev_month = first_day_this_month - timedelta(days=1)
         first_day_prev_month = last_day_prev_month.replace(day=1)
 
-        for user in users:
-            jobs_result = job_get_all(user.user_id, cleaned=True)
+        # Batch-load all jobs for all users in one query
+        user_ids = [u.user_id for u in users]
+        user_map = {u.user_id: u for u in users}
+        all_jobs = (
+            session.query(Job)
+            .filter(
+                Job.user_id.in_(user_ids),
+                Job.job_type == JobType.TRANSCRIPTION,
+                Job.created_at >= first_day_prev_month,
+            )
+            .all()
+        ) if user_ids else []
 
-            if not jobs_result or "jobs" not in jobs_result:
+        for job in all_jobs:
+            job_date = job.created_at.date()
+            status_val = job.status.value if job.status else ""
+
+            if status_val not in ("completed", "deleted"):
                 continue
 
-            jobs = jobs_result["jobs"]
+            transcribed_seconds = job.transcribed_seconds or 0
+            user = user_map.get(job.user_id)
+            is_external = user and user.username.isnumeric()
 
-            for job in jobs:
-                try:
-                    job_date = datetime.strptime(
-                        job["created_at"], "%Y-%m-%d %H:%M:%S.%f"
-                    ).date()
-                except (ValueError, KeyError):
-                    continue
+            if job_date >= first_day_this_month:
+                total_files_current += 1
+                total_transcribed_minutes_current += transcribed_seconds / 60
 
-                if job.get("status") == "completed" or job.get("status") == "deleted":
-                    transcribed_seconds = job.get("transcribed_seconds", 0)
+                if is_external:
+                    transcribed_minutes_external += transcribed_seconds / 60
+                else:
+                    transcribed_minutes += transcribed_seconds / 60
 
-                    if job_date >= first_day_this_month:
-                        total_files_current += 1
-                        total_transcribed_minutes_current += transcribed_seconds / 60
+            elif first_day_prev_month <= job_date <= last_day_prev_month:
+                total_files_last += 1
+                total_transcribed_minutes_last += transcribed_seconds / 60
 
-                        if user.username.isnumeric():
-                            transcribed_minutes_external += transcribed_seconds / 60
-                        else:
-                            transcribed_minutes += transcribed_seconds / 60
-
-                    elif first_day_prev_month <= job_date <= last_day_prev_month:
-                        total_files_last += 1
-                        total_transcribed_minutes_last += transcribed_seconds / 60
-
-                        if user.username.isnumeric():
-                            transcribed_minutes_external_last_month += (
-                                transcribed_seconds / 60
-                            )
-                        else:
-                            transcribed_minutes_last_month += transcribed_seconds / 60
+                if is_external:
+                    transcribed_minutes_external_last_month += (
+                        transcribed_seconds / 60
+                    )
+                else:
+                    transcribed_minutes_last_month += transcribed_seconds / 60
 
         # Calculate block usage for fixed plan customers
         blocks_purchased = customer.blocks_purchased if customer.blocks_purchased else 0
@@ -486,16 +485,12 @@ def get_customer_name_from_realm(realm: str) -> Optional[str]:
         Optional[str]: Customer name if found, else None.
     """
     with get_session() as session:
-        customers = session.query(Customer).all()
-
-        for customer in customers:
-            customer_realms = [
-                r.strip() for r in customer.realms.split(",") if r.strip()
-            ]
-            if realm in customer_realms:
-                return customer.name
-
-        return None
+        customer = (
+            session.query(Customer)
+            .filter(Customer.realms.like(f"%{realm}%"))
+            .first()
+        )
+        return customer.name if customer else None
 
 
 def get_customer_by_realm(realm: str) -> Optional[dict]:
@@ -510,16 +505,12 @@ def get_customer_by_realm(realm: str) -> Optional[dict]:
         Optional[dict]: Customer dictionary if found, else None.
     """
     with get_session() as session:
-        customers = session.query(Customer).all()
-
-        for customer in customers:
-            customer_realms = [
-                r.strip() for r in customer.realms.split(",") if r.strip()
-            ]
-            if realm in customer_realms:
-                return customer.as_dict()
-
-        return None
+        customer = (
+            session.query(Customer)
+            .filter(Customer.realms.like(f"%{realm}%"))
+            .first()
+        )
+        return customer.as_dict() if customer else None
 
 
 def customer_list_by_realms(realms: list[str]) -> list[dict]:
@@ -533,17 +524,14 @@ def customer_list_by_realms(realms: list[str]) -> list[dict]:
         List of customer dictionaries
     """
     with get_session() as session:
-        customers = session.query(Customer).all()
-        matching_customers = []
+        from sqlalchemy import or_
 
-        for customer in customers:
-            customer_realms = [
-                r.strip() for r in customer.realms.split(",") if r.strip()
-            ]
-            if any(realm in customer_realms for realm in realms):
-                matching_customers.append(customer.as_dict())
-
-        return matching_customers
+        customers = (
+            session.query(Customer)
+            .filter(or_(*(Customer.realms.like(f"%{realm}%") for realm in realms)))
+            .all()
+        )
+        return [customer.as_dict() for customer in customers]
 
 
 def export_customers_to_csv(admin_user: dict) -> str:

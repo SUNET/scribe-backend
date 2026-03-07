@@ -16,7 +16,7 @@
 # limitations under the License.
 
 from db.customer import customer_get_from_user_id
-from db.models import Group, GroupModelLink, GroupUserLink, User
+from db.models import Customer, Group, GroupModelLink, GroupUserLink, User
 from db.session import get_session
 from sqlalchemy import or_
 from typing import Optional
@@ -230,12 +230,35 @@ def group_get_all(user_id: str, realm: str) -> list[dict]:
                 .all()
             )
 
+        # Batch-load customer names for all group owners
+        owner_ids = [g.owner_user_id for g in groups if g.owner_user_id]
+        owner_realms = {}
+        if owner_ids:
+            owner_users = (
+                session.query(User.user_id, User.realm)
+                .filter(User.user_id.in_(owner_ids))
+                .all()
+            )
+            owner_realms = {u.user_id: u.realm for u in owner_users}
+
+        realm_to_customer = {}
+        unique_realms = set(owner_realms.values())
+        if unique_realms:
+            customers = (
+                session.query(Customer)
+                .filter(or_(*(Customer.realms.like(f"%{r}%") for r in unique_realms)))
+                .all()
+            )
+            for c in customers:
+                for r in unique_realms:
+                    if r in [x.strip() for x in c.realms.split(",") if x.strip()]:
+                        realm_to_customer[r] = c.name
+
         for group in groups:
             group_dict = group.as_dict()
             group_dict["nr_users"] = len(group_dict["users"])
-            group_dict["customer_name"] = customer_get_from_user_id(
-                group_dict["owner_user_id"]
-            ).get("name", "None")
+            owner_realm = owner_realms.get(group_dict["owner_user_id"])
+            group_dict["customer_name"] = realm_to_customer.get(owner_realm, "None")
 
             groups_list.append(group_dict)
             all_users.extend(group_dict["users"])
@@ -366,27 +389,36 @@ def group_update(
         if quota_seconds is not None:
             group.quota_seconds = quota_seconds
         if usernames is not None:
-            for username in usernames:
-                user = session.query(User).filter(User.username == username).first()
+            # Batch-load all users by username
+            users = (
+                session.query(User)
+                .filter(User.username.in_(usernames))
+                .all()
+            )
+            user_by_name = {u.username: u for u in users}
+            user_ids = [u.id for u in users]
 
-                found = (
-                    session.query(GroupUserLink)
+            # Batch-check if any of these users are in other groups
+            if user_ids:
+                conflicts = (
+                    session.query(GroupUserLink, Group.name)
+                    .join(Group, Group.id == GroupUserLink.group_id)
                     .filter(
                         GroupUserLink.group_id != group.id,
-                        GroupUserLink.user_id == user.id,
+                        GroupUserLink.user_id.in_(user_ids),
                     )
-                    .first()
+                    .all()
                 )
 
-                if found:
-                    other_group_name = (
-                        session.query(Group.name)
-                        .filter(Group.id == found.group_id)
-                        .scalar()
-                    )
-                    raise ValueError(
-                        f'User {username} is already in the group "{other_group_name}".'
-                    )
+                if conflicts:
+                    # Find the username for the conflicting user
+                    conflict_user_ids = {c[0].user_id: c[1] for c in conflicts}
+                    for username in usernames:
+                        user = user_by_name.get(username)
+                        if user and user.id in conflict_user_ids:
+                            raise ValueError(
+                                f'User {username} is already in the group "{conflict_user_ids[user.id]}".'
+                            )
 
             links = (
                 session.query(GroupUserLink)
@@ -399,7 +431,7 @@ def group_update(
                     session.delete(link)
 
             for username in usernames:
-                user = session.query(User).filter(User.username == username).first()
+                user = user_by_name.get(username)
 
                 if user:
                     link = GroupUserLink(

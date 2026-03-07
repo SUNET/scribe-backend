@@ -24,7 +24,7 @@ from auth.client import dn_in_list
 from utils.log import get_logger
 
 from db.job import job_get_all, job_remove
-from db.models import Customer, Group, GroupUserLink, Job, User
+from db.models import Customer, Group, GroupUserLink, Job, JobType, User
 from db.session import get_session
 from utils.crypto import (
     generate_rsa_keypair,
@@ -250,6 +250,22 @@ def user_get_all(realm) -> list:
             )
             rows = q.all()
 
+        # Batch-load customers for numeric usernames (REACH users)
+        numeric_usernames = set()
+        for row in rows:
+            username = row[0].username
+            if username != "api_user" and username.isdigit():
+                numeric_usernames.add(username)
+
+        customer_map = {}
+        if numeric_usernames:
+            customers = (
+                session.query(Customer)
+                .filter(Customer.partner_id.in_(numeric_usernames))
+                .all()
+            )
+            customer_map = {c.partner_id: c.name for c in customers}
+
         group_map = {}
 
         for row in rows:
@@ -259,14 +275,9 @@ def user_get_all(realm) -> list:
             if user_dict["username"] == "api_user":
                 continue
             elif user_dict["username"].isdigit():
-                customer = (
-                    session.query(Customer)
-                    .filter(Customer.partner_id == user_dict["username"])
-                    .first()
-                )
-
-                if customer:
-                    user_dict["username"] = "(REACH) " + customer.name
+                customer_name = customer_map.get(user_dict["username"])
+                if customer_name:
+                    user_dict["username"] = "(REACH) " + customer_name
 
             if user_dict["id"] in group_map:
                 group_map[user_dict["id"]]["groups"] += ", " + group_dict["name"]
@@ -573,100 +584,111 @@ def users_statistics(
         transcribed_minutes_per_day = {d: 0 for d in date_range}
         transcribed_minutes_per_day_last_month = {d: 0 for d in date_range_prev_month}
 
+        # Batch-load all jobs for all users in one query
+        user_ids = [u.user_id for u in users]
+        all_jobs = (
+            session.query(Job)
+            .filter(
+                Job.user_id.in_(user_ids),
+                Job.job_type == JobType.TRANSCRIPTION,
+                Job.created_at >= first_day_prev_month,
+            )
+            .all()
+        ) if user_ids else []
+
+        # Group jobs by user_id
+        jobs_by_user = {}
+        for job in all_jobs:
+            jobs_by_user.setdefault(job.user_id, []).append(job)
+
+        # Batch-load customer names for numeric usernames
+        numeric_usernames = {u.username for u in users if u.username.isdigit()}
+        customer_map = {}
+        if numeric_usernames:
+            customers = (
+                session.query(Customer)
+                .filter(Customer.partner_id.in_(numeric_usernames))
+                .all()
+            )
+            customer_map = {c.partner_id: c.name for c in customers}
+
         for user in users:
-            jobs = job_get_all(user.user_id, cleaned=True)["jobs"]
+            jobs = jobs_by_user.get(user.user_id, [])
 
             if not jobs:
                 continue
 
             if user.username.isdigit():
-                customer = (
-                    session.query(Customer)
-                    .filter(Customer.partner_id == user.username)
-                    .first()
-                )
-                if customer:
-                    display_name = "(REACH) " + customer.name
-                else:
-                    display_name = user.username
+                customer_name = customer_map.get(user.username)
+                display_name = "(REACH) " + customer_name if customer_name else user.username
             else:
                 display_name = user.username
 
             for job in jobs:
-                job_date = datetime.strptime(
-                    job["created_at"], "%Y-%m-%d %H:%M:%S.%f"
-                ).date()
-
+                job_date = job.created_at.date()
                 job_date_str = job_date.isoformat()
+                status_val = job.status.value if job.status else ""
 
                 if job_date >= first_day_this_month:
-                    if job["status"] == "completed" or job["status"] == "deleted":
+                    if status_val in ("completed", "deleted"):
                         transcribed_files += 1
-                        total_transcribed_minutes += job["transcribed_seconds"] / 60
+                        total_transcribed_minutes += job.transcribed_seconds / 60
 
-                        transcribed_minutes_per_day[job_date_str] += (
-                            job["transcribed_seconds"] / 60
-                        )
+                        if job_date_str in transcribed_minutes_per_day:
+                            transcribed_minutes_per_day[job_date_str] += (
+                                job.transcribed_seconds / 60
+                            )
 
                         if display_name not in transcribed_minutes_per_user:
                             transcribed_minutes_per_user[display_name] = 0
 
                         transcribed_minutes_per_user[display_name] += (
-                            job["transcribed_seconds"] / 60
+                            job.transcribed_seconds / 60
                         )
 
-                    if job["status"] == "uploaded" or job["status"] == "in_progress":
-                        if job["status"] == "in_progress":
-                            status = "transcribing"
-                        else:
-                            status = job["status"]
-
+                    if status_val in ("uploaded", "in_progress"):
                         job_data = {
-                            "status": status,
-                            "created_at": job["created_at"],
-                            "updated_at": job["updated_at"],
-                            "job_id": job["uuid"],
-                            "username": display_name,  # Use display name
+                            "status": "transcribing" if status_val == "in_progress" else status_val,
+                            "created_at": str(job.created_at),
+                            "updated_at": str(job.updated_at),
+                            "job_id": job.uuid,
+                            "username": display_name,
                         }
 
                         job_queue.append(job_data)
                 elif first_day_prev_month <= job_date <= last_day_prev_month:
-                    if job["status"] == "completed" or job["status"] == "deleted":
+                    if status_val in ("completed", "deleted"):
                         transcribed_files_last_month += 1
 
                         total_transcribed_minutes_last_month += (
-                            job["transcribed_seconds"] / 60
+                            job.transcribed_seconds / 60
                         )
 
-                        transcribed_minutes_per_day_last_month[job_date_str] += (
-                            job["transcribed_seconds"] / 60
-                        )
+                        if job_date_str in transcribed_minutes_per_day_last_month:
+                            transcribed_minutes_per_day_last_month[job_date_str] += (
+                                job.transcribed_seconds / 60
+                            )
 
                         if display_name not in transcribed_minutes_per_user_last_month:
                             transcribed_minutes_per_user_last_month[display_name] = 0
 
                         transcribed_minutes_per_user_last_month[display_name] += (
-                            job["transcribed_seconds"] / 60
+                            job.transcribed_seconds / 60
                         )
 
-                    if job["status"] == "uploaded" or job["status"] == "in_progress":
-                        if job["status"] == "in_progress":
-                            status = "transcribing"
-                        else:
-                            status = job["status"]
-
+                    if status_val in ("uploaded", "in_progress"):
                         job_data = {
-                            "status": status,
-                            "created_at": job["created_at"],
-                            "updated_at": job["updated_at"],
-                            "job_id": job["uuid"],
-                            "username": display_name,  # Use display name
+                            "status": "transcribing" if status_val == "in_progress" else status_val,
+                            "created_at": str(job.created_at),
+                            "updated_at": str(job.updated_at),
+                            "job_id": job.uuid,
+                            "username": display_name,
                         }
 
                         job_queue.append(job_data)
                 else:
                     log.debug(
-                        f"Skipping job {job['uuid']} for user {user.username}"
+                        f"Skipping job {job.uuid} for user {user.username}"
                         + f" with date {job_date_str}"
                     )
 

@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from sqlalchemy import func
+from sqlalchemy import case, func
 from db.models import PageView
 from db.session import get_session
 
@@ -38,7 +38,7 @@ def get_page_views_summary() -> list[dict]:
                 PageView.path,
                 func.count().label("total_views"),
                 func.sum(
-                    func.cast(PageView.timestamp >= cutoff, type_=func.count().type)
+                    case((PageView.timestamp >= cutoff, 1), else_=0)
                 ).label("views_30d"),
             )
             .group_by(PageView.path)
@@ -92,6 +92,7 @@ def get_hourly_heatmap(days: int = 30) -> list[dict]:
             )
             .filter(PageView.timestamp >= cutoff)
             .group_by("dow", "hour")
+            .order_by("dow", "hour")
             .all()
         )
         return [
