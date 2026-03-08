@@ -9,6 +9,7 @@ dependencies = [
     "alembic>=1.17.1",
     "annotated-types==0.7.0",
     "anyio==4.9.0",
+    "apscheduler>=3.11.2",
     "authlib==1.5.2",
     "cachetools==5.5.2",
     "certifi==2025.4.26",
