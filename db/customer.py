@@ -632,7 +632,9 @@ def export_customers_to_csv(admin_user: dict) -> str:
             "Blocks Consumed": stats.get("blocks_consumed", 0),
             "Minutes Included": stats.get("minutes_included", 0),
             "Overage Minutes": stats.get("overage_minutes", 0),
-            f"Overage Minutes ({last_month})": stats.get("overage_minutes_last_month", 0),
+            f"Overage Minutes ({last_month})": stats.get(
+                "overage_minutes_last_month", 0
+            ),
             "Remaining Minutes": stats.get("remaining_minutes", 0),
             "Notes": customer.get("notes", ""),
             "Created At": customer.get("created_at", ""),
@@ -653,10 +655,14 @@ def check_quota_alerts() -> None:
     """
 
     with get_session() as session:
-        customers = session.query(Customer).filter(
-            Customer.priceplan == "fixed",
-            Customer.blocks_purchased > 0,
-        ).all()
+        customers = (
+            session.query(Customer)
+            .filter(
+                Customer.priceplan == "fixed",
+                Customer.blocks_purchased > 0,
+            )
+            .all()
+        )
 
         for customer in customers:
             stats = customer_get_statistics(customer.id)
@@ -674,13 +680,20 @@ def check_quota_alerts() -> None:
             realm_list = [r.strip() for r in customer.realms.split(",") if r.strip()]
 
             for realm in realm_list:
-                admin_users = session.query(User).filter(
-                    User.admin == True,
-                    User.admin_domains.ilike(f"%{realm}%"),
-                ).all()
+                admin_users = (
+                    session.query(User)
+                    .filter(
+                        User.admin is True,
+                        User.admin_domains.ilike(f"%{realm}%"),
+                    )
+                    .all()
+                )
 
                 for admin_user in admin_users:
-                    if not admin_user.notifications or "quota" not in admin_user.notifications.split(","):
+                    if (
+                        not admin_user.notifications
+                        or "quota" not in admin_user.notifications.split(",")
+                    ):
                         continue
 
                     if not admin_user.email:
@@ -721,37 +734,70 @@ def send_weekly_usage_reports() -> None:
     with get_session() as session:
         customers = session.query(Customer).all()
 
+        # Build a mapping of admin user -> list of customers they manage
+        admin_customer_map = {}  # user_id -> (user, set of customer ids)
+
         for customer in customers:
-            stats = customer_get_statistics(customer.id)
             realm_list = [r.strip() for r in customer.realms.split(",") if r.strip()]
 
             for realm in realm_list:
-                admin_users = session.query(User).filter(
-                    User.admin == True,
-                    User.admin_domains.ilike(f"%{realm}%"),
-                ).all()
+                users = session.query(User).all()
+                for user in users:
+                    if (
+                        user.admin
+                        and user.admin_domains
+                        and realm in user.admin_domains.split(",")
+                    ):
+                        if user.user_id not in admin_customer_map:
+                            admin_customer_map[user.user_id] = (user, set())
+                        admin_customer_map[user.user_id][1].add(customer.id)
 
-                for admin_user in admin_users:
-                    if not admin_user.notifications or "weekly_report" not in admin_user.notifications.split(","):
-                        continue
+        # Send one email per admin user with aggregated stats
+        for user_id, (admin_user, customer_ids) in admin_customer_map.items():
+            if (
+                not admin_user.notifications
+                or "weekly_report" not in admin_user.notifications.split(",")
+            ):
+                continue
 
-                    if not admin_user.email:
-                        continue
+            if not admin_user.email:
+                continue
 
-                    notifications.send_weekly_usage_report(
-                        to_email=admin_user.email,
-                        customer_name=customer.name,
-                        total_users=stats.get("total_users", 0),
-                        transcribed_files=stats.get("transcribed_files", 0),
-                        transcribed_minutes=stats.get("transcribed_minutes", 0),
-                        transcribed_minutes_external=stats.get("transcribed_minutes_external", 0),
-                        blocks_purchased=stats.get("blocks_purchased", 0),
-                        blocks_consumed=stats.get("blocks_consumed", 0),
-                        minutes_included=stats.get("minutes_included", 0),
-                        remaining_minutes=stats.get("remaining_minutes", 0),
-                        overage_minutes=stats.get("overage_minutes", 0),
-                    )
+            customer_names = []
+            totals = {
+                "total_users": 0,
+                "transcribed_files": 0,
+                "transcribed_minutes": 0,
+                "transcribed_minutes_external": 0,
+                "blocks_purchased": 0,
+                "blocks_consumed": 0,
+                "minutes_included": 0,
+                "remaining_minutes": 0,
+                "overage_minutes": 0,
+            }
 
-                    log.info(
-                        f"Weekly usage report sent to {admin_user.email} for customer {customer.name}"
-                    )
+            for cid in customer_ids:
+                cust = session.query(Customer).filter(Customer.id == cid).first()
+                if cust:
+                    customer_names.append(cust.name)
+                stats = customer_get_statistics(cid)
+                for key in totals:
+                    totals[key] += stats.get(key, 0)
+
+            notifications.send_weekly_usage_report(
+                to_email=admin_user.email,
+                customer_name=", ".join(sorted(customer_names)),
+                total_users=totals["total_users"],
+                transcribed_files=totals["transcribed_files"],
+                transcribed_minutes=totals["transcribed_minutes"],
+                transcribed_minutes_external=totals["transcribed_minutes_external"],
+                blocks_purchased=totals["blocks_purchased"],
+                blocks_consumed=totals["blocks_consumed"],
+                minutes_included=totals["minutes_included"],
+                remaining_minutes=totals["remaining_minutes"],
+                overage_minutes=totals["overage_minutes"],
+            )
+
+            log.info(
+                f"Weekly usage report sent to {admin_user.email} for customers: {', '.join(sorted(customer_names))}"
+            )
