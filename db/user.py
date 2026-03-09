@@ -135,6 +135,9 @@ def user_delete(username: str) -> bool:
         user.active = False
         user.admin = False
         user.bofh = False
+        user.encryption_settings = False
+        user.private_key = None
+        user.public_key = None
 
         log.info(f"User {username} soft-deleted.")
 
