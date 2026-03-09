@@ -129,7 +129,7 @@ def user_delete(username: str) -> bool:
         user.deleted = True
         user.active = False
         user.admin = False
-        user.both = False
+        user.bofh = False
 
         log.info(f"User {username} soft-deleted.")
 
