@@ -23,8 +23,7 @@ from typing import Optional
 from auth.client import dn_in_list
 from utils.log import get_logger
 
-from db.job import job_get_all, job_remove
-from db.models import Customer, Group, GroupUserLink, Job, User
+from db.models import Customer, Group, GroupUserLink, Job, JobResult, User
 from db.session import get_session
 from utils.crypto import (
     generate_rsa_keypair,
@@ -108,6 +107,33 @@ def user_create(
                 log.info(f"Sent new user creation notification to admin {admin_email}")
 
         return user.dict()
+
+
+def user_delete(username: str) -> bool:
+    """
+    Soft-delete a user by setting the deleted flag.
+
+    Parameters:
+        username (str): The username of the user to delete.
+
+    Returns:
+        bool: True if the user was soft-deleted, False if not found.
+    """
+
+    with get_session() as session:
+        user = session.query(User).filter(User.username == username).first()
+
+        if not user:
+            return False
+
+        user.deleted = True
+        user.active = False
+        user.admin = False
+        user.both = False
+
+        log.info(f"User {username} soft-deleted.")
+
+        return True
 
 
 def user_exists(username: str) -> bool:
@@ -256,7 +282,7 @@ def user_get_all(realm) -> list:
             user_dict = row[0].as_dict()
             group_dict = row[1].as_dict() if row[1] else []
 
-            if user_dict["username"] == "api_user":
+            if user_dict["username"] == "api_user" or user_dict.get("deleted"):
                 continue
             elif user_dict["username"].isdigit():
                 customer = (
@@ -423,6 +449,8 @@ def user_update(
             jobs = session.query(Job).filter(Job.user_id == user.user_id).all()
 
             for job in jobs:
+                from db.job import job_remove
+
                 job_remove(job.uuid)
 
         if email:
@@ -574,6 +602,8 @@ def users_statistics(
         transcribed_minutes_per_day_last_month = {d: 0 for d in date_range_prev_month}
 
         for user in users:
+            from db.job import job_get_all
+
             jobs = job_get_all(user.user_id, cleaned=True)["jobs"]
 
             if not jobs:

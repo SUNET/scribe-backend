@@ -18,6 +18,7 @@
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
 from db.user import (
+    user_delete,
     user_get,
     users_statistics,
     user_get_all,
@@ -167,6 +168,34 @@ async def modify_user(
         user_update(
             user_id,
             admin_domains=item.admin_domains,
+        )
+
+    return JSONResponse(content={"result": {"status": "OK"}})
+
+
+@router.delete("/admin/{username}")
+async def delete_user(
+    request: Request,
+    username: str,
+    admin_user: dict = Depends(get_current_admin_user),
+) -> JSONResponse:
+    """
+    Soft-delete a user. The user is marked as deleted and will be
+    permanently removed once all associated job data has been cleaned up.
+
+    Parameters:
+        request (Request): The incoming HTTP request.
+        username (str): The username of the user to delete.
+        admin_user (dict): The current user.
+
+    Returns:
+        JSONResponse: The result of the operation.
+    """
+
+    if not user_delete(username):
+        return JSONResponse(
+            content={"error": "User not found"},
+            status_code=404,
         )
 
     return JSONResponse(content={"result": {"status": "OK"}})

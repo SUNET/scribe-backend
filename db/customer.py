@@ -20,7 +20,6 @@ import io
 
 from datetime import datetime, timedelta
 
-from db.job import job_get_all
 from db.models import Customer, User
 from db.session import get_session
 from typing import Optional
@@ -371,6 +370,7 @@ def customer_get_statistics(customer_id: str) -> dict:
         first_day_prev_month = last_day_prev_month.replace(day=1)
 
         for user in users:
+            from db.job import job_get_all
             jobs_result = job_get_all(user.user_id, cleaned=True)
 
             if not jobs_result or "jobs" not in jobs_result:

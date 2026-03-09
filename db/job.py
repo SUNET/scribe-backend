@@ -33,6 +33,7 @@ from typing import Optional
 from utils.log import get_logger
 from utils.settings import get_settings
 from utils.notifications import notifications
+from db.models import GroupUserLink
 
 log = get_logger()
 settings = get_settings()
@@ -340,6 +341,39 @@ def job_remove(uuid: str) -> bool:
     return True
 
 
+def user_purge_deleted() -> None:
+    """
+    Hard-delete soft-deleted users that have no remaining jobs or job results.
+    Intended to be called from job_cleanup() after jobs have been purged.
+    """
+
+    with get_session() as session:
+        deleted_users = (
+            session.query(User).filter(User.deleted == True).all()  # noqa: E712
+        )
+
+        for user in deleted_users:
+            has_jobs = (
+                session.query(Job).filter(Job.user_id == user.user_id).first()
+                is not None
+            )
+            has_results = (
+                session.query(JobResult)
+                .filter(JobResult.user_id == user.user_id)
+                .first()
+                is not None
+            )
+
+            if not has_jobs and not has_results:
+                session.query(GroupUserLink).filter(
+                    GroupUserLink.user_id == user.id
+                ).delete()
+                session.delete(user)
+                log.info(
+                    f"User {user.username} permanently deleted (no remaining data)."
+                )
+
+
 def job_cleanup() -> None:
     """
     Remove all jobs from the database.
@@ -440,6 +474,8 @@ def job_cleanup() -> None:
             notifications.notification_sent_record_add(
                 user.user_id, job.uuid, "deletion_warning"
             )
+
+    user_purge_deleted()
 
 
 def job_result_get(
