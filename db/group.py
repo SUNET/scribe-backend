@@ -18,7 +18,7 @@
 from db.customer import customer_get_from_user_id
 from db.models import Group, GroupModelLink, GroupUserLink, User
 from db.session import get_session
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from typing import Optional
 
 from utils.log import get_logger
@@ -276,14 +276,15 @@ def group_get_quota_left(group_id: int) -> int:
             return 0
 
         quota_seconds = group.quota_seconds
-        used_seconds = 0
 
-        for user in group.users:
-            used_seconds += user.transcribed_seconds if user.transcribed_seconds else 0
+        used_seconds = (
+            session.query(func.coalesce(func.sum(User.transcribed_seconds), 0))
+            .join(GroupUserLink, GroupUserLink.user_id == User.id)
+            .filter(GroupUserLink.group_id == group_id)
+            .scalar()
+        )
 
-        quota_left = quota_seconds - used_seconds
-
-        return max(quota_left, 0)
+        return max(quota_seconds - used_seconds, 0)
 
 
 def group_delete(group_id: int) -> bool:
@@ -300,34 +301,19 @@ def group_delete(group_id: int) -> bool:
         if not (group := session.query(Group).filter(Group.id == group_id).first()):
             return False
 
+        # Bulk delete all links to users and models
+        session.query(GroupUserLink).filter(
+            GroupUserLink.group_id == group_id
+        ).delete()
+        session.query(GroupModelLink).filter(
+            GroupModelLink.group_id == group_id
+        ).delete()
+
         session.delete(group)
-
-        # Also delete all links to users and models
-        links = (
-            session.query(GroupUserLink)
-            .filter(GroupUserLink.group_id == group_id)
-            .all()
-        )
-
-        if links:
-            for link in links:
-                session.delete(link)
-
-        links = (
-            session.query(GroupModelLink)
-            .filter(GroupModelLink.group_id == group_id)
-            .all()
-        )
-
-        if links:
-            for link in links:
-                session.delete(link)
 
         log.info(f"Group {group_id} deleted.")
 
         return True
-
-    return False
 
 
 def group_update(
@@ -367,40 +353,41 @@ def group_update(
         if quota_seconds is not None:
             group.quota_seconds = quota_seconds
         if usernames is not None:
-            for username in usernames:
-                user = session.query(User).filter(User.username == username).first()
+            # Batch-fetch all users by username in one query
+            users_map = {
+                u.username: u
+                for u in session.query(User).filter(User.username.in_(usernames)).all()
+            }
 
-                found = (
-                    session.query(GroupUserLink)
+            # Batch-check for users already in other groups
+            user_db_ids = [u.id for u in users_map.values()]
+            if user_db_ids:
+                existing_links = (
+                    session.query(GroupUserLink, Group.name)
+                    .join(Group, Group.id == GroupUserLink.group_id)
                     .filter(
                         GroupUserLink.group_id != group.id,
-                        GroupUserLink.user_id == user.id,
+                        GroupUserLink.user_id.in_(user_db_ids),
                     )
-                    .first()
+                    .all()
                 )
 
-                if found:
-                    other_group_name = (
-                        session.query(Group.name)
-                        .filter(Group.id == found.group_id)
-                        .scalar()
-                    )
+                # Build reverse map: user db id -> username
+                id_to_username = {u.id: u.username for u in users_map.values()}
+
+                for link, group_name in existing_links:
+                    username = id_to_username.get(link.user_id, "unknown")
                     raise ValueError(
-                        f'User {username} is already in the group "{other_group_name}".'
+                        f'User {username} is already in the group "{group_name}".'
                     )
 
-            links = (
-                session.query(GroupUserLink)
-                .filter(GroupUserLink.group_id == group.id)
-                .all()
-            )
-
-            if links:
-                for link in links:
-                    session.delete(link)
+            # Bulk delete existing links
+            session.query(GroupUserLink).filter(
+                GroupUserLink.group_id == group.id
+            ).delete()
 
             for username in usernames:
-                user = session.query(User).filter(User.username == username).first()
+                user = users_map.get(username)
 
                 if user:
                     link = GroupUserLink(
@@ -575,16 +562,21 @@ def check_group_quota_alerts() -> None:
     """
 
     with get_session() as session:
-        groups = session.query(Group).filter(
-            Group.quota_seconds > 0,
-        ).all()
+        # Fetch groups with quota and their usage in one query
+        group_usage_rows = (
+            session.query(
+                Group,
+                func.coalesce(func.sum(User.transcribed_seconds), 0).label("used_seconds"),
+            )
+            .outerjoin(GroupUserLink, GroupUserLink.group_id == Group.id)
+            .outerjoin(User, User.id == GroupUserLink.user_id)
+            .filter(Group.quota_seconds > 0)
+            .group_by(Group.id)
+            .all()
+        )
 
-        for group in groups:
+        for group, used_seconds in group_usage_rows:
             quota_seconds = group.quota_seconds
-            used_seconds = 0
-
-            for user in group.users:
-                used_seconds += user.transcribed_seconds if user.transcribed_seconds else 0
 
             usage_percent = int((used_seconds / quota_seconds) * 100)
 

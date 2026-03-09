@@ -168,6 +168,9 @@ class JobResult(SQLModel, table=True):
     """
 
     __tablename__ = "job_results"
+    __table_args__ = (
+        Index("ix_job_results_job_id_user_id", "job_id", "user_id"),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True, description="Primary key")
     job_id: str = Field(
@@ -223,6 +226,7 @@ class Job(SQLModel, table=True):
     __tablename__ = "jobs"
     __table_args__ = (
         Index("ix_jobs_user_id_job_type", "user_id", "job_type"),
+        Index("ix_jobs_status_deletion_date", "status", "deletion_date"),
     )
 
     id: Optional[int] = Field(default=None, primary_key=True, description="Primary key")
@@ -334,6 +338,10 @@ class GroupUserLink(SQLModel, table=True):
     """
 
     __tablename__ = "group_user_link"
+    __table_args__ = (
+        Index("ix_group_user_link_group_id_user_id", "group_id", "user_id"),
+        Index("ix_group_user_link_user_id_group_id", "user_id", "group_id"),
+    )
 
     group_id: Optional[int] = Field(
         default=None, foreign_key="groups.id", primary_key=True
@@ -489,6 +497,9 @@ class GroupModelLink(SQLModel, table=True):
     """
 
     __tablename__ = "group_model_link"
+    __table_args__ = (
+        Index("ix_group_model_link_group_id_model_id", "group_id", "model_id"),
+    )
 
     group_id: int = Field(foreign_key="groups.id", primary_key=True)
     model_id: int = Field(foreign_key="models.id", primary_key=True)
@@ -646,6 +657,9 @@ class NotificationsSent(SQLModel, table=True):
     """
 
     __tablename__ = "notifications_sent"
+    __table_args__ = (
+        Index("ix_notifications_sent_user_id_uuid_type", "user_id", "uuid", "notification_type"),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True, description="Primary key")
     user_id: str = Field(
@@ -689,6 +703,10 @@ class PageView(SQLModel, table=True):
     """
 
     __tablename__ = "page_views"
+    __table_args__ = (
+        Index("ix_page_views_timestamp_path", "timestamp", "path"),
+        Index("ix_page_views_path_timestamp", "path", "timestamp"),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True, description="Primary key")
     path: str = Field(index=True, description="Page path that was visited")

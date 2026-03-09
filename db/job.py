@@ -346,32 +346,31 @@ def user_purge_deleted() -> None:
     Hard-delete soft-deleted users that have no remaining jobs or job results.
     Intended to be called from job_cleanup() after jobs have been purged.
     """
+    from sqlalchemy import exists
 
     with get_session() as session:
-        deleted_users = (
-            session.query(User).filter(User.deleted == True).all()  # noqa: E712
+        # Find deleted users that have no jobs and no job results in one query
+        job_exists = exists().where(Job.user_id == User.user_id)
+        result_exists = exists().where(JobResult.user_id == User.user_id)
+
+        purgeable_users = (
+            session.query(User)
+            .filter(
+                User.deleted == True,  # noqa: E712
+                ~job_exists,
+                ~result_exists,
+            )
+            .all()
         )
 
-        for user in deleted_users:
-            has_jobs = (
-                session.query(Job).filter(Job.user_id == user.user_id).first()
-                is not None
+        for user in purgeable_users:
+            session.query(GroupUserLink).filter(
+                GroupUserLink.user_id == user.id
+            ).delete()
+            session.delete(user)
+            log.info(
+                f"User {user.username} permanently deleted (no remaining data)."
             )
-            has_results = (
-                session.query(JobResult)
-                .filter(JobResult.user_id == user.user_id)
-                .first()
-                is not None
-            )
-
-            if not has_jobs and not has_results:
-                session.query(GroupUserLink).filter(
-                    GroupUserLink.user_id == user.id
-                ).delete()
-                session.delete(user)
-                log.info(
-                    f"User {user.username} permanently deleted (no remaining data)."
-                )
 
 
 def job_cleanup() -> None:
@@ -394,13 +393,28 @@ def job_cleanup() -> None:
             session.query(Job).filter(Job.deletion_date <= datetime.now()).all()
         )
 
+        # Notify about jobs that will be deleted tomorrow
+        jobs_to_notify = (
+            session.query(Job)
+            .filter(Job.deletion_date <= datetime.now() + timedelta(days=1))
+            .filter(Job.status != JobStatusEnum.DELETED)
+            .all()
+        )
+
+        # Pre-fetch all relevant users in one query instead of per-job lookups
+        all_user_ids = {job.user_id for job in jobs_to_cleanup + jobs_to_notify}
+        users_map = {}
+        if all_user_ids:
+            user_rows = session.query(User).filter(User.user_id.in_(all_user_ids)).all()
+            users_map = {u.user_id: u for u in user_rows}
+
         for job in jobs_to_cleanup:
             job_remove(job.uuid)
 
             if job.status == JobStatusEnum.DELETED:
                 continue
 
-            user = session.query(User).filter(User.user_id == job.user_id).first()
+            user = users_map.get(job.user_id)
 
             if not user or not user.notifications:
                 continue
@@ -440,16 +454,8 @@ def job_cleanup() -> None:
             )
             session.delete(job)
 
-        # Notify about jobs that will be deleted tomorrow
-        jobs_to_notify = (
-            session.query(Job)
-            .filter(Job.deletion_date <= datetime.now() + timedelta(days=1))
-            .filter(Job.status != JobStatusEnum.DELETED)
-            .all()
-        )
-
         for job in jobs_to_notify:
-            user = session.query(User).filter(User.user_id == job.user_id).first()
+            user = users_map.get(job.user_id)
 
             if not user or not user.notifications:
                 continue
