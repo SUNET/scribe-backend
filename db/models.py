@@ -417,6 +417,10 @@ class User(SQLModel, table=True):
         default=None,
         description="User's notification preferences",
     )
+    deleted: bool = Field(
+        default=False,
+        description="Indicates if the user has been soft-deleted",
+    )
 
     def as_dict(self) -> dict:
         """
@@ -434,6 +438,7 @@ class User(SQLModel, table=True):
             "email": self.email,
             "encryption_settings": self.encryption_settings,
             "last_login": str(self.last_login),
+            "deleted": self.deleted,
             "notifications": self.notifications,
             "private_key": self.private_key,
             "public_key": self.public_key,
