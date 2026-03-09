@@ -139,6 +139,13 @@ def user_delete(username: str) -> bool:
         user.private_key = None
         user.public_key = None
 
+        # Remove files and job results for the deleted user
+        jobs = session.query(Job).filter(Job.user_id == user.user_id).all()
+        for job in jobs:
+            from db.job import job_remove
+
+            job_remove(job.uuid)
+
         log.info(f"User {username} soft-deleted.")
 
         return True
