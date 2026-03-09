@@ -261,7 +261,7 @@ This is an automated message from Sunet Scribe. If you need assistance, please c
         "message": """\
 Hello,
 
-Here is the weekly usage report for customer {customer_name}:
+Here is the weekly usage report for {customer_name}:
 
 Current month:
 - Total users: {total_users}
