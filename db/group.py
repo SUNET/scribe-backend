@@ -118,7 +118,9 @@ def group_get(group_id: str, realm: str, user_id: Optional[str] = "") -> Optiona
         if realm == "*":
             # Admin requesting from all realms
             other_users = (
-                session.query(User).filter(~User.groups.any(Group.id == group_id)).all()
+                session.query(User)
+                .filter(~User.groups.any(Group.id == group_id), User.deleted == False)  # noqa: E712
+                .all()
             )
         else:
             # Check admin domains for additional users
@@ -134,11 +136,12 @@ def group_get(group_id: str, realm: str, user_id: Optional[str] = "") -> Optiona
             # Get users not in the group but in the admin domains
             other_users = (
                 session.query(User)
-                .filter(~User.groups.any(Group.id == group_id))
                 .filter(
+                    ~User.groups.any(Group.id == group_id),
+                    User.deleted == False,  # noqa: E712
                     User.realm.in_(
                         [domain.strip() for domain in admin_domains.split(",")]
-                    )
+                    ),
                 )
                 .all()
             )
@@ -356,7 +359,9 @@ def group_update(
             # Batch-fetch all users by username in one query
             users_map = {
                 u.username: u
-                for u in session.query(User).filter(User.username.in_(usernames)).all()
+                for u in session.query(User)
+                .filter(User.username.in_(usernames), User.deleted == False)  # noqa: E712
+                .all()
             }
 
             # Batch-check for users already in other groups
@@ -413,7 +418,15 @@ def group_add_user(group_id: int, username: str, role: str = "member") -> dict:
         dict: The group-user link as a dictionary.
     """
     with get_session() as session:
-        user_id = session.query(User.id).filter(User.username == username).scalar()
+        user = (
+            session.query(User)
+            .filter(User.username == username, User.deleted == False)  # noqa: E712
+            .first()
+        )
+        if not user:
+            return {}
+
+        user_id = user.id
 
         link = (
             session.query(GroupUserLink)
