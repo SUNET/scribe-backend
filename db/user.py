@@ -24,7 +24,16 @@ from auth.client import dn_in_list
 from sqlalchemy import func
 from utils.log import get_logger
 
-from db.models import Customer, Group, GroupUserLink, Job, JobResult, JobStatusEnum, JobType, User
+from db.models import (
+    Customer,
+    Group,
+    GroupUserLink,
+    Job,
+    JobResult,
+    JobStatusEnum,
+    JobType,
+    User,
+)
 from db.session import get_session
 from utils.crypto import (
     generate_rsa_keypair,
@@ -72,7 +81,9 @@ def user_create(
 
             if user.deleted:
                 user.deleted = False
-                log.info(f"User {username} was previously deleted, resetting deleted flag.")
+                log.info(
+                    f"User {username} was previously deleted, resetting deleted flag."
+                )
 
             user.last_login = datetime.utcnow()
 
@@ -138,6 +149,7 @@ def user_delete(username: str) -> bool:
         user.encryption_settings = False
         user.private_key = None
         user.public_key = None
+        user.notifications = None
 
         # Remove files and job results for the deleted user
         jobs = session.query(Job).filter(Job.user_id == user.user_id).all()
@@ -295,8 +307,7 @@ def user_get_all(realm) -> list:
 
         # Pre-fetch customers for numeric usernames to avoid N+1 queries
         numeric_usernames = {
-            row[0].username for row in rows
-            if row[0].username.isdigit()
+            row[0].username for row in rows if row[0].username.isdigit()
         }
         customer_name_map = {}
         if numeric_usernames:
@@ -315,7 +326,9 @@ def user_get_all(realm) -> list:
                 continue
             elif user_dict["username"].isdigit():
                 if user_dict["username"] in customer_name_map:
-                    user_dict["username"] = "(REACH) " + customer_name_map[user_dict["username"]]
+                    user_dict["username"] = (
+                        "(REACH) " + customer_name_map[user_dict["username"]]
+                    )
 
             if user_dict["id"] in group_map:
                 group_map[user_dict["id"]]["groups"] += ", " + group_dict["name"]
@@ -627,14 +640,18 @@ def users_statistics(
         # Batch-fetch all jobs for the relevant time window instead of N+1 per user
         user_ids = [user.user_id for user in users]
         all_jobs = (
-            session.query(Job)
-            .filter(
-                Job.user_id.in_(user_ids),
-                Job.job_type == JobType.TRANSCRIPTION,
-                Job.created_at >= first_day_prev_month,
+            (
+                session.query(Job)
+                .filter(
+                    Job.user_id.in_(user_ids),
+                    Job.job_type == JobType.TRANSCRIPTION,
+                    Job.created_at >= first_day_prev_month,
+                )
+                .all()
             )
-            .all()
-        ) if user_ids else []
+            if user_ids
+            else []
+        )
 
         # Build a mapping of user_id -> jobs
         jobs_by_user = {}
@@ -659,7 +676,9 @@ def users_statistics(
                 continue
 
             if user.username.isdigit():
-                display_name = "(REACH) " + customer_name_map.get(user.username, user.username)
+                display_name = "(REACH) " + customer_name_map.get(
+                    user.username, user.username
+                )
             else:
                 display_name = user.username
 
@@ -684,8 +703,15 @@ def users_statistics(
                             job.transcribed_seconds / 60
                         )
 
-                    if job.status in (JobStatusEnum.UPLOADED, JobStatusEnum.IN_PROGRESS):
-                        status = "transcribing" if job.status == JobStatusEnum.IN_PROGRESS else job.status.value
+                    if job.status in (
+                        JobStatusEnum.UPLOADED,
+                        JobStatusEnum.IN_PROGRESS,
+                    ):
+                        status = (
+                            "transcribing"
+                            if job.status == JobStatusEnum.IN_PROGRESS
+                            else job.status.value
+                        )
 
                         job_data = {
                             "status": status,
@@ -716,8 +742,15 @@ def users_statistics(
                             job.transcribed_seconds / 60
                         )
 
-                    if job.status in (JobStatusEnum.UPLOADED, JobStatusEnum.IN_PROGRESS):
-                        status = "transcribing" if job.status == JobStatusEnum.IN_PROGRESS else job.status.value
+                    if job.status in (
+                        JobStatusEnum.UPLOADED,
+                        JobStatusEnum.IN_PROGRESS,
+                    ):
+                        status = (
+                            "transcribing"
+                            if job.status == JobStatusEnum.IN_PROGRESS
+                            else job.status.value
+                        )
 
                         job_data = {
                             "status": status,
@@ -851,6 +884,10 @@ def users_admin_domains_from_realm(realm: str) -> list:
     """
 
     with get_session() as session:
-        users = session.query(User).filter(User.admin_domains.ilike(realm)).all()
+        users = (
+            session.query(User)
+            .filter(User.admin_domains.ilike(realm), User.deleted == False)
+            .all()
+        )  # noqa: E712
 
         return [user.as_dict() for user in users]

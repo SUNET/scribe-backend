@@ -701,6 +701,7 @@ def check_quota_alerts() -> None:
                     session.query(User)
                     .filter(
                         User.admin is True,
+                        User.deleted == False,  # noqa: E712
                         User.admin_domains.ilike(f"%{realm}%"),
                     )
                     .all()
@@ -754,7 +755,7 @@ def send_weekly_usage_reports() -> None:
         # Fetch admin users once instead of per-realm
         admin_users = (
             session.query(User)
-            .filter(User.admin == True, User.admin_domains != None)  # noqa: E712
+            .filter(User.admin == True, User.deleted == False, User.admin_domains != None)  # noqa: E712
             .all()
         )
 
