@@ -39,6 +39,7 @@ def customer_create(
     base_fee: int,
     realms: str,
     contact_email: Optional[str] = None,
+    support_contact_email: Optional[str] = None,
     notes: Optional[str] = None,
     blocks_purchased: Optional[int] = 0,
 ) -> dict:
@@ -53,6 +54,7 @@ def customer_create(
         base_fee (int): Base fee for the customer.
         realms (str): Comma-separated list of realms associated with the customer.
         contact_email (Optional[str]): Contact email for the customer.
+        support_contact_email (Optional[str]): Support contact email shown to end users.
         notes (Optional[str]): Additional notes about the customer.
         blocks_purchased (Optional[int]): Number of blocks purchased (for fixed plans).
 
@@ -66,6 +68,7 @@ def customer_create(
             partner_id=partner_id,
             name=name,
             contact_email=contact_email,
+            support_contact_email=support_contact_email,
             priceplan=priceplan,
             base_fee=base_fee,
             realms=realms,
@@ -201,6 +204,7 @@ def customer_update(
     partner_id: Optional[str] = None,
     name: Optional[str] = None,
     contact_email: Optional[str] = None,
+    support_contact_email: Optional[str] = None,
     priceplan: Optional[str] = None,
     base_fee: Optional[int] = None,
     realms: Optional[str] = None,
@@ -216,6 +220,7 @@ def customer_update(
         partner_id (Optional[str]): New partner ID for the customer.
         name (Optional[str]): New name for the customer.
         contact_email (Optional[str]): New contact email for the customer.
+        support_contact_email (Optional[str]): New support contact email for end users.
         priceplan (Optional[str]): New pricing plan for the customer.
         base_fee (Optional[int]): New base fee for the customer.
         realms (Optional[str]): New comma-separated list of realms for the customer.
@@ -243,6 +248,8 @@ def customer_update(
             customer.name = name
         if contact_email is not None:
             customer.contact_email = contact_email
+        if support_contact_email is not None:
+            customer.support_contact_email = support_contact_email
         if priceplan is not None:
             customer.priceplan = priceplan
         if base_fee is not None:

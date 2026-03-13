@@ -545,6 +545,7 @@ async def create_customer(
         base_fee=item.base_fee,
         realms=item.realms,
         contact_email=item.contact_email,
+        support_contact_email=item.support_contact_email,
         notes=item.notes,
         blocks_purchased=item.blocks_purchased,
     )
@@ -607,6 +608,7 @@ async def update_customer(
         base_fee=item.base_fee,
         realms=item.realms,
         contact_email=item.contact_email,
+        support_contact_email=item.support_contact_email,
         notes=item.notes,
         blocks_purchased=item.blocks_purchased,
     )
