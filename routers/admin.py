@@ -44,6 +44,19 @@ from db.customer import (
     get_all_realms,
     export_customers_to_csv,
 )
+from db.attribute_rules import (
+    rule_create,
+    rule_get,
+    rule_get_all,
+    rule_update,
+    rule_delete,
+    test_rules,
+)
+from db.onboarding_attributes import (
+    attribute_get_all,
+    attribute_add,
+    attribute_delete,
+)
 
 from db.analytics import (
     log_page_view,
@@ -70,6 +83,10 @@ from utils.validators import (
     UpdateGroupRequest,
     CreateCustomerRequest,
     UpdateCustomerRequest,
+    CreateAttributeRuleRequest,
+    UpdateAttributeRuleRequest,
+    CreateOnboardingAttributeRequest,
+    TestRulesRequest,
 )
 
 log = get_logger()
@@ -623,6 +640,264 @@ async def delete_customer(
 
     if not customer_delete(customer_id):
         return JSONResponse(content={"error": "Customer not found"}, status_code=404)
+
+    return JSONResponse(content={"result": {"status": "OK"}})
+
+
+# ── Attribute Rules ──────────────────────────────────────────────────────
+
+
+def _get_admin_allowed_realms(admin_user: dict) -> list[str]:
+    """Return the list of realms a non-BOFH admin may manage rules for."""
+    realms = set()
+    if admin_user.get("realm"):
+        realms.add(admin_user["realm"])
+    for d in (admin_user.get("admin_domains") or "").split(","):
+        d = d.strip()
+        if d:
+            realms.add(d)
+    return sorted(realms)
+
+
+def _rule_realm_overlaps(rule_realm: str | None, allowed: list[str]) -> bool:
+    """Check if any of the rule's comma-separated realms overlap with allowed."""
+    if not rule_realm:
+        return True
+    rule_realms = {r.strip() for r in rule_realm.split(",") if r.strip()}
+    return bool(rule_realms & set(allowed))
+
+
+@router.get("/admin/rules")
+async def list_rules(
+    request: Request,
+    admin_user: dict = Depends(get_current_admin_user),
+) -> JSONResponse:
+    """List all attribute rules."""
+
+    if admin_user["bofh"]:
+        realm = "*"
+    else:
+        realm = _get_admin_allowed_realms(admin_user)
+
+    return JSONResponse(content={"result": rule_get_all(realm=realm)})
+
+
+@router.post("/admin/rules")
+async def create_rule(
+    request: Request,
+    item: CreateAttributeRuleRequest,
+    admin_user: dict = Depends(get_current_admin_user),
+) -> JSONResponse:
+    """Create a new attribute rule."""
+
+    if not item.name or not item.attribute_name or not item.attribute_value:
+        return JSONResponse(
+            content={"error": "Missing required fields"}, status_code=400
+        )
+
+    if admin_user["bofh"]:
+        realm = item.realm
+    else:
+        allowed = _get_admin_allowed_realms(admin_user)
+        realm = item.realm if item.realm in allowed else allowed[0]
+
+    rule = rule_create(
+        name=item.name,
+        attribute_name=item.attribute_name,
+        attribute_condition=item.attribute_condition,
+        attribute_value=item.attribute_value,
+        realm=realm,
+        activate=item.activate,
+        admin=item.admin,
+        deny=item.deny,
+        assign_to_group=item.assign_to_group,
+        assign_to_admin_domains=item.assign_to_admin_domains,
+        owner_domains=item.owner_domains,
+        enabled=item.enabled,
+    )
+
+    return JSONResponse(content={"result": rule})
+
+
+@router.get("/admin/rules/{rule_id}")
+async def get_rule(
+    request: Request,
+    rule_id: int,
+    admin_user: dict = Depends(get_current_admin_user),
+) -> JSONResponse:
+    """Get a single attribute rule."""
+
+    rule = rule_get(rule_id)
+    if not rule:
+        return JSONResponse(content={"error": "Rule not found"}, status_code=404)
+
+    if not admin_user["bofh"]:
+        allowed = _get_admin_allowed_realms(admin_user)
+        if not _rule_realm_overlaps(rule.get("realm"), allowed):
+            return JSONResponse(
+                content={"error": "Not authorized"}, status_code=403
+            )
+
+    return JSONResponse(content={"result": rule})
+
+
+@router.put("/admin/rules/{rule_id}")
+async def update_rule_endpoint(
+    request: Request,
+    rule_id: int,
+    item: UpdateAttributeRuleRequest,
+    admin_user: dict = Depends(get_current_admin_user),
+) -> JSONResponse:
+    """Update an attribute rule."""
+
+    if not admin_user["bofh"]:
+        existing = rule_get(rule_id)
+        if not existing:
+            return JSONResponse(
+                content={"error": "Rule not found"}, status_code=404
+            )
+        allowed = _get_admin_allowed_realms(admin_user)
+        if not _rule_realm_overlaps(existing.get("realm"), allowed):
+            return JSONResponse(
+                content={"error": "Not authorized"}, status_code=403
+            )
+        # Prevent non-BOFH from moving rule to a realm they don't manage
+        if item.realm is not None:
+            new_realms = {r.strip() for r in item.realm.split(",") if r.strip()}
+            if not new_realms.issubset(set(allowed)):
+                item.realm = existing["realm"]
+
+    rule = rule_update(
+        rule_id,
+        name=item.name,
+        attribute_name=item.attribute_name,
+        attribute_condition=item.attribute_condition,
+        attribute_value=item.attribute_value,
+        realm=item.realm,
+        activate=item.activate,
+        admin=item.admin,
+        deny=item.deny,
+        assign_to_group=item.assign_to_group,
+        assign_to_admin_domains=item.assign_to_admin_domains,
+        owner_domains=item.owner_domains,
+        enabled=item.enabled,
+    )
+
+    if not rule:
+        return JSONResponse(content={"error": "Rule not found"}, status_code=404)
+
+    return JSONResponse(content={"result": rule})
+
+
+@router.delete("/admin/rules/{rule_id}")
+async def delete_rule_endpoint(
+    request: Request,
+    rule_id: int,
+    admin_user: dict = Depends(get_current_admin_user),
+) -> JSONResponse:
+    """Delete an attribute rule."""
+
+    if not admin_user["bofh"]:
+        existing = rule_get(rule_id)
+        if not existing:
+            return JSONResponse(
+                content={"error": "Rule not found"}, status_code=404
+            )
+        allowed = _get_admin_allowed_realms(admin_user)
+        if not _rule_realm_overlaps(existing.get("realm"), allowed):
+            return JSONResponse(
+                content={"error": "Not authorized"}, status_code=403
+            )
+
+    if not rule_delete(rule_id):
+        return JSONResponse(content={"error": "Rule not found"}, status_code=404)
+
+    return JSONResponse(content={"result": {"status": "OK"}})
+
+
+@router.post("/admin/rules/test")
+async def test_rules_endpoint(
+    request: Request,
+    item: TestRulesRequest,
+    admin_user: dict = Depends(get_current_admin_user),
+) -> JSONResponse:
+    """Test which users would be matched by the given rules."""
+
+    if not item.rule_ids:
+        return JSONResponse(
+            content={"error": "No rule IDs provided"}, status_code=400
+        )
+
+    if admin_user["bofh"]:
+        realm = "*"
+    else:
+        allowed = _get_admin_allowed_realms(admin_user)
+        realm = allowed
+
+    matches = test_rules(item.rule_ids, realm=realm)
+
+    return JSONResponse(content={"result": matches})
+
+
+# ── Onboarding Attributes ───────────────────────────────────────────────
+
+
+@router.get("/admin/attributes")
+async def list_attributes(
+    request: Request,
+    admin_user: dict = Depends(get_current_admin_user),
+) -> JSONResponse:
+    """List all supported onboarding attributes."""
+
+    return JSONResponse(content={"result": attribute_get_all()})
+
+
+@router.post("/admin/attributes")
+async def create_attribute(
+    request: Request,
+    item: CreateOnboardingAttributeRequest,
+    admin_user: dict = Depends(get_current_admin_user),
+) -> JSONResponse:
+    """Add a new onboarding attribute. BOFH only."""
+
+    if not admin_user["bofh"]:
+        return JSONResponse(
+            content={"error": "Only BOFH can manage attributes"}, status_code=403
+        )
+
+    if not item.name:
+        return JSONResponse(
+            content={"error": "Attribute name is required"}, status_code=400
+        )
+
+    attr = attribute_add(
+        name=item.name, description=item.description, example=item.example
+    )
+    if not attr:
+        return JSONResponse(
+            content={"error": "Attribute already exists"}, status_code=409
+        )
+
+    return JSONResponse(content={"result": attr})
+
+
+@router.delete("/admin/attributes/{attribute_id}")
+async def delete_attribute(
+    request: Request,
+    attribute_id: int,
+    admin_user: dict = Depends(get_current_admin_user),
+) -> JSONResponse:
+    """Delete an onboarding attribute. BOFH only."""
+
+    if not admin_user["bofh"]:
+        return JSONResponse(
+            content={"error": "Only BOFH can manage attributes"}, status_code=403
+        )
+
+    if not attribute_delete(attribute_id):
+        return JSONResponse(
+            content={"error": "Attribute not found"}, status_code=404
+        )
 
     return JSONResponse(content={"result": {"status": "OK"}})
 

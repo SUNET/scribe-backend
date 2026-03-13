@@ -25,9 +25,10 @@ from apscheduler.triggers.cron import CronTrigger
 from fastapi_utils.tasks import repeat_every
 from starlette.middleware.sessions import SessionMiddleware
 
-from auth.oidc import RefreshToken, oauth, verify_user
+from auth.oidc import RefreshToken, oauth, verify_token, verify_user
 
 from db.job import job_cleanup
+from db.attribute_rules import apply_rule_actions, evaluate_rules
 from db.user import (
     user_create,
     user_exists,
@@ -180,6 +181,23 @@ async def auth(request: Request):
     if "refresh_token" in token:
         request.session["refresh_token"] = token["refresh_token"]
 
+    # Evaluate attribute-based onboarding rules at login time
+    try:
+        decoded_jwt = await verify_token(id_token=token["access_token"])
+        username = decoded_jwt.get("preferred_username", "")
+        realm = decoded_jwt.get("realm", username.split("@")[-1] if "@" in username else "")
+        user = user_create(
+            username=username,
+            realm=realm,
+            user_id=decoded_jwt["sub"],
+            email=decoded_jwt.get("email", ""),
+        )
+        actions = evaluate_rules(decoded_jwt, user)
+        if actions:
+            apply_rule_actions(actions, user)
+    except Exception as e:
+        log.warning(f"Rule evaluation at login failed: {e}")
+
     url = f"{settings.OIDC_FRONTEND_URI}/?token={token['id_token']}"
 
     if "refresh_token" in token:
@@ -326,6 +344,14 @@ scheduler.add_job(
     id="send_weekly_usage_reports",
     replace_existing=True,
 )
+
+
+@app.on_event("startup")
+def seed_onboarding_attributes_on_startup() -> None:
+    """Seed default onboarding attributes if the table is empty."""
+    from db.onboarding_attributes import seed_default_attributes
+
+    seed_default_attributes()
 
 
 @app.on_event("startup")

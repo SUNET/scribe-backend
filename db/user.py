@@ -432,6 +432,12 @@ def user_update(
             log.info(f"Setting user {user.user_id} active status to {active}")
             user.active = active
 
+            # Track manual deactivation so auto-provisioning rules don't override it
+            if not active:
+                user.manually_deactivated = True
+            else:
+                user.manually_deactivated = False
+
             if (
                 user.email != ""
                 and user.email is not None
