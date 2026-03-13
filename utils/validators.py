@@ -89,6 +89,46 @@ class VideoStreamRequestBody(BaseModel):
     encryption_password: Optional[str] = ""
 
 
+class CreateAttributeRuleRequest(BaseModel):
+    name: str
+    attribute_name: str
+    attribute_condition: str
+    attribute_value: str
+    realm: Optional[str] = None
+    activate: bool = False
+    admin: bool = False
+    deny: bool = False
+    assign_to_group: Optional[str] = None
+    assign_to_admin_domains: Optional[str] = None
+    owner_domains: Optional[str] = None
+    enabled: bool = True
+
+
+class UpdateAttributeRuleRequest(BaseModel):
+    name: Optional[str] = None
+    attribute_name: Optional[str] = None
+    attribute_condition: Optional[str] = None
+    attribute_value: Optional[str] = None
+    realm: Optional[str] = None
+    activate: Optional[bool] = None
+    admin: Optional[bool] = None
+    deny: Optional[bool] = None
+    assign_to_group: Optional[str] = None
+    assign_to_admin_domains: Optional[str] = None
+    owner_domains: Optional[str] = None
+    enabled: Optional[bool] = None
+
+
+class CreateOnboardingAttributeRequest(BaseModel):
+    name: str
+    description: str = ""
+    example: str = ""
+
+
+class TestRulesRequest(BaseModel):
+    rule_ids: list[int]
+
+
 class NotificationSettings(BaseModel):
     notify_on_job: Optional[bool] = None
     notify_on_deletion: Optional[bool] = None

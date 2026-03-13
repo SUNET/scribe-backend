@@ -429,6 +429,10 @@ class User(SQLModel, table=True):
         default=False,
         description="Indicates if the user has been soft-deleted",
     )
+    manually_deactivated: bool = Field(
+        default=False,
+        description="Indicates if the user was manually deactivated by an admin",
+    )
 
     def as_dict(self) -> dict:
         """
@@ -447,6 +451,7 @@ class User(SQLModel, table=True):
             "encryption_settings": self.encryption_settings,
             "last_login": str(self.last_login),
             "deleted": self.deleted,
+            "manually_deactivated": self.manually_deactivated,
             "notifications": self.notifications,
             "private_key": self.private_key,
             "public_key": self.public_key,
@@ -715,3 +720,118 @@ class PageView(SQLModel, table=True):
         index=True,
         description="Timestamp of the page view",
     )
+
+
+class AttributeConditionEnum(str, Enum):
+    """
+    Enum representing the condition type for attribute matching.
+    """
+
+    EQUALS = "equals"
+    NOT_EQUALS = "not_equals"
+    CONTAINS = "contains"
+    NOT_CONTAINS = "not_contains"
+    STARTS_WITH = "starts_with"
+    ENDS_WITH = "ends_with"
+    REGEX_MATCH = "regex_match"
+
+
+class AttributeRule(SQLModel, table=True):
+    """
+    Model representing an attribute-based rule for automatic
+    group assignment and user provisioning.
+    """
+
+    __tablename__ = "attribute_rules"
+
+    id: Optional[int] = Field(default=None, primary_key=True, description="Primary key")
+    name: str = Field(index=True, description="Human-readable rule name")
+    attribute_name: str = Field(
+        index=True, description="JWT claim / SAML friendly name to match"
+    )
+    attribute_condition: AttributeConditionEnum = Field(
+        sa_column=Field(sa_column=SQLAlchemyEnum(AttributeConditionEnum)),
+        description="Condition used to evaluate the attribute value",
+    )
+    attribute_value: str = Field(description="Value to compare against")
+    created_at: datetime = Field(
+        default_factory=datetime.utcnow, description="Creation timestamp"
+    )
+    enabled: bool = Field(
+        default=True, description="Whether this rule is currently active"
+    )
+
+    # Actions when rule matches
+    activate: bool = Field(
+        default=False,
+        description="Automatically activate matching users",
+    )
+    admin: bool = Field(
+        default=False,
+        description="Grant admin privileges to matching users",
+    )
+    deny: bool = Field(
+        default=False,
+        description="Deny access to matching users",
+    )
+    assign_to_group: Optional[str] = Field(
+        default=None,
+        description="Group ID to assign matching users to",
+    )
+    assign_to_admin_domains: Optional[str] = Field(
+        default=None,
+        description="Comma-separated admin domains to assign to matching users",
+    )
+
+    # Scope
+    realm: Optional[str] = Field(
+        default=None, index=True, description="Realm this rule applies to"
+    )
+    owner_domains: Optional[str] = Field(
+        default=None,
+        description="Comma-separated domains whose admins can manage this rule",
+    )
+
+    def as_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "attribute_name": self.attribute_name,
+            "attribute_condition": self.attribute_condition.value
+            if self.attribute_condition
+            else None,
+            "attribute_value": self.attribute_value,
+            "created_at": str(self.created_at),
+            "enabled": self.enabled,
+            "activate": self.activate,
+            "admin": self.admin,
+            "deny": self.deny,
+            "assign_to_group": self.assign_to_group,
+            "assign_to_admin_domains": self.assign_to_admin_domains,
+            "realm": self.realm,
+            "owner_domains": self.owner_domains,
+        }
+
+
+class OnboardingAttribute(SQLModel, table=True):
+    """
+    Model representing a supported SAML/JWT attribute that can be used
+    when configuring attribute rules.
+    """
+
+    __tablename__ = "onboarding_attributes"
+
+    id: Optional[int] = Field(default=None, primary_key=True, description="Primary key")
+    name: str = Field(
+        index=True, unique=True, description="Attribute friendly name"
+    )
+    description: str = Field(default="", description="Human-readable description")
+    example: str = Field(default="", description="Example value")
+
+    def as_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "example": self.example,
+        }
