@@ -608,6 +608,10 @@ class Customer(SQLModel, table=True):
         default=None,
         description="Contact email for the customer organization",
     )
+    support_contact_email: Optional[str] = Field(
+        default=None,
+        description="Support contact email shown to end users in the help dialog",
+    )
     priceplan: PricePlanEnum = Field(
         default=PricePlanEnum.VARIABLE,
         sa_column=Field(sa_column=SQLAlchemyEnum(PricePlanEnum)),
@@ -647,6 +651,7 @@ class Customer(SQLModel, table=True):
             "partner_id": self.partner_id,
             "name": self.name,
             "contact_email": self.contact_email,
+            "support_contact_email": self.support_contact_email,
             "priceplan": self.priceplan,
             "base_fee": self.base_fee if self.base_fee else 0,
             "realms": self.realms,

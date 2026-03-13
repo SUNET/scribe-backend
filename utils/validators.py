@@ -59,6 +59,7 @@ class CreateCustomerRequest(BaseModel):
     base_fee: Optional[float] = 0
     realms: Optional[str] = ""
     contact_email: Optional[str] = ""
+    support_contact_email: Optional[str] = ""
     notes: Optional[str] = ""
     blocks_purchased: Optional[int] = 0
 
@@ -71,6 +72,7 @@ class UpdateCustomerRequest(BaseModel):
     base_fee: Optional[float] = None
     realms: Optional[str] = None
     contact_email: Optional[str] = None
+    support_contact_email: Optional[str] = None
     notes: Optional[str] = None
     blocks_purchased: Optional[int] = None
 
