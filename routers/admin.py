@@ -713,7 +713,6 @@ async def create_rule(
         admin=item.admin,
         deny=item.deny,
         assign_to_group=item.assign_to_group,
-        assign_to_admin_domains=item.assign_to_admin_domains,
         owner_domains=item.owner_domains,
         enabled=item.enabled,
     )
@@ -780,7 +779,6 @@ async def update_rule_endpoint(
         admin=item.admin,
         deny=item.deny,
         assign_to_group=item.assign_to_group,
-        assign_to_admin_domains=item.assign_to_admin_domains,
         owner_domains=item.owner_domains,
         enabled=item.enabled,
     )

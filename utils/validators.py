@@ -101,7 +101,6 @@ class CreateAttributeRuleRequest(BaseModel):
     admin: bool = False
     deny: bool = False
     assign_to_group: Optional[str] = None
-    assign_to_admin_domains: Optional[str] = None
     owner_domains: Optional[str] = None
     enabled: bool = True
 
@@ -116,7 +115,6 @@ class UpdateAttributeRuleRequest(BaseModel):
     admin: Optional[bool] = None
     deny: Optional[bool] = None
     assign_to_group: Optional[str] = None
-    assign_to_admin_domains: Optional[str] = None
     owner_domains: Optional[str] = None
     enabled: Optional[bool] = None
 
