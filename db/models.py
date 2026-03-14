@@ -783,11 +783,6 @@ class AttributeRule(SQLModel, table=True):
         default=None,
         description="Group ID to assign matching users to",
     )
-    assign_to_admin_domains: Optional[str] = Field(
-        default=None,
-        description="Comma-separated admin domains to assign to matching users",
-    )
-
     # Scope
     realm: Optional[str] = Field(
         default=None, index=True, description="Realm this rule applies to"
@@ -812,7 +807,6 @@ class AttributeRule(SQLModel, table=True):
             "admin": self.admin,
             "deny": self.deny,
             "assign_to_group": self.assign_to_group,
-            "assign_to_admin_domains": self.assign_to_admin_domains,
             "realm": self.realm,
             "owner_domains": self.owner_domains,
         }

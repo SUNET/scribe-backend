@@ -37,7 +37,6 @@ def rule_create(
     admin: bool = False,
     deny: bool = False,
     assign_to_group: Optional[str] = None,
-    assign_to_admin_domains: Optional[str] = None,
     owner_domains: Optional[str] = None,
     enabled: bool = True,
 ) -> dict:
@@ -54,7 +53,6 @@ def rule_create(
             admin=admin,
             deny=deny,
             assign_to_group=assign_to_group,
-            assign_to_admin_domains=assign_to_admin_domains,
             owner_domains=owner_domains,
             enabled=enabled,
         )
@@ -109,7 +107,6 @@ def rule_update(
     admin: Optional[bool] = None,
     deny: Optional[bool] = None,
     assign_to_group: Optional[str] = None,
-    assign_to_admin_domains: Optional[str] = None,
     owner_domains: Optional[str] = None,
     enabled: Optional[bool] = None,
 ) -> Optional[dict]:
@@ -143,8 +140,6 @@ def rule_update(
             rule.deny = deny
         if assign_to_group is not None:
             rule.assign_to_group = assign_to_group
-        if assign_to_admin_domains is not None:
-            rule.assign_to_admin_domains = assign_to_admin_domains
         if owner_domains is not None:
             rule.owner_domains = owner_domains
         if enabled is not None:
@@ -219,7 +214,7 @@ def evaluate_rules(decoded_jwt: dict, user: dict) -> dict:
         user: The user dict from user_create.
 
     Returns:
-        dict with keys: activate, admin, deny, groups, admin_domains
+        dict with keys: activate, admin, deny, groups
     """
 
     realm = user.get("realm", "")
@@ -238,7 +233,6 @@ def evaluate_rules(decoded_jwt: dict, user: dict) -> dict:
         "admin": False,
         "deny": False,
         "groups": [],
-        "admin_domains": [],
     }
 
     with get_session() as session:
@@ -285,12 +279,6 @@ def evaluate_rules(decoded_jwt: dict, user: dict) -> dict:
             if rule.assign_to_group:
                 actions["groups"].append(rule.assign_to_group)
 
-            if rule.assign_to_admin_domains:
-                for domain in rule.assign_to_admin_domains.split(","):
-                    d = domain.strip()
-                    if d and d not in actions["admin_domains"]:
-                        actions["admin_domains"].append(d)
-
     return actions
 
 
@@ -326,15 +314,6 @@ def apply_rule_actions(actions: dict, user: dict) -> None:
         if actions.get("admin") and not db_user.admin:
             log.info(f"Auto-granting admin to user {username} via attribute rule.")
             db_user.admin = True
-
-        if actions.get("admin_domains"):
-            existing = set(
-                d.strip()
-                for d in (db_user.admin_domains or "").split(",")
-                if d.strip()
-            )
-            new_domains = existing | set(actions["admin_domains"])
-            db_user.admin_domains = ",".join(sorted(new_domains))
 
     # Group assignments (outside the user session to avoid nested session issues)
     for group_id in actions.get("groups", []):
@@ -429,8 +408,6 @@ def test_rules(rule_ids: list[int], realm: str | list[str] | None = None) -> lis
                     if rule.assign_to_group:
                         gname = group_names.get(rule.assign_to_group, rule.assign_to_group)
                         actions.append(f"Group: {gname}")
-                    if rule.assign_to_admin_domains:
-                        actions.append(f"Admin domains: {rule.assign_to_admin_domains}")
                     rule_info["actions"] = actions
                     matched_rules.append(rule_info)
 
