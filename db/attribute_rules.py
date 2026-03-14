@@ -224,7 +224,7 @@ def evaluate_rules(decoded_jwt: dict, user: dict) -> dict:
     # If the user was manually deactivated, skip all auto-provisioning
     if user.get("manually_deactivated", False):
         log.info(
-            f"Skipping rule evaluation for {username}: manually deactivated."
+            f"Skipping rule evaluation for user_id={user_id}: manually deactivated."
         )
         return {}
 
@@ -263,21 +263,28 @@ def evaluate_rules(decoded_jwt: dict, user: dict) -> dict:
             if not matched:
                 continue
 
-            log.info(
-                f"Rule '{rule.name}' (id={rule.id}) matched for user {username}."
-            )
-
+            rule_actions = []
             if rule.deny:
                 actions["deny"] = True
+                rule_actions.append("deny")
 
             if rule.activate:
                 actions["activate"] = True
+                rule_actions.append("activate")
 
             if rule.admin:
                 actions["admin"] = True
+                rule_actions.append("grant admin")
 
             if rule.assign_to_group:
                 actions["groups"].append(rule.assign_to_group)
+                rule_actions.append(f"assign to group {rule.assign_to_group}")
+
+            log.info(
+                f"Rule '{rule.name}' matched for user_id={user_id}: "
+                f"{rule.attribute_name} {rule.attribute_condition.value} "
+                f"'{rule.attribute_value}' -> {', '.join(rule_actions)}."
+            )
 
     return actions
 
@@ -303,16 +310,16 @@ def apply_rule_actions(actions: dict, user: dict) -> None:
             return
 
         if actions.get("deny"):
-            log.info(f"Deny rule matched for user {username}, deactivating.")
+            log.info(f"Deny rule matched for user_id={user_id}, deactivating.")
             db_user.active = False
             return
 
         if actions.get("activate") and not db_user.active:
-            log.info(f"Auto-activating user {username} via attribute rule.")
+            log.info(f"Auto-activating user_id={user_id} via attribute rule.")
             db_user.active = True
 
         if actions.get("admin") and not db_user.admin:
-            log.info(f"Auto-granting admin to user {username} via attribute rule.")
+            log.info(f"Auto-granting admin to user_id={user_id} via attribute rule.")
             db_user.admin = True
 
     # Group assignments (outside the user session to avoid nested session issues)
@@ -321,7 +328,7 @@ def apply_rule_actions(actions: dict, user: dict) -> None:
             group_add_user(int(group_id), username)
         except (ValueError, TypeError):
             log.warning(
-                f"Could not assign user {username} to group {group_id}."
+                f"Could not assign user_id={user_id} to group {group_id}."
             )
 
 
