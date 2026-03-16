@@ -151,12 +151,12 @@ If a user's attributes match the rule, the rule's actions are applied.
 
 Provisioning rules are evaluated during login using the following flow:
 ```
-Login
- └─ Identity attributes
-     └─ Provisioning rules
-         └─ Conflict resolution
-             └─ Manual override
-                 └─ Final user state
+Login event
+└─ Identity attributes received from IdP
+   └─ Provisioning rules evaluated
+      └─ Conflict resolution
+         └─ Manual override
+            └─ Final user state
 ```
 The final user state determines:
 
