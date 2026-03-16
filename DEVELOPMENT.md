@@ -23,7 +23,7 @@ Each level represents a scope boundary for administration and provisioning.
 - **Realm**: a login domain within an account
 - **Users**: authenticated users belonging to a realm
 
-### Example system hierarchy
+### Example System Hierarchy
 ```
 System
 ├─ System administrators
@@ -196,18 +196,18 @@ Manual changes remain in effect until an administrator changes them again.
 
 ---
 
-## Summary
+## Design Principles and Invariants
 
-The control model of Sunet Scribe can be summarised as follows:
+When working on the provisioning logic, keep the following model in mind:
 
-Identity attributes  
-↓  
-Provisioning rules  
-↓  
-Automated system decision  
-↓  
-Administrative override  
-↓  
-Final user state
+Identity attributes → Provisioning rules → Conflict resolution → Manual override → Final user state
 
-Provisioning provides automation and scalability, while administrators retain full control over the final state of user accounts.
+System invariants:
+
+- Provisioning rules operate only within the scope of the user's account and realm.
+- Provisioning runs on every login.
+- All enabled rules are evaluated.
+- Deactivate overrides Activate.
+- Group assignment is determined by the last matching rule.
+- Manual administrative changes persist across logins.
+- Administrator privileges are always assigned manually and must not be managed by provisioning rules.
