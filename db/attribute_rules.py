@@ -20,7 +20,7 @@ import re
 from typing import Optional
 
 from db.group import group_add_user
-from db.models import AttributeConditionEnum, AttributeRule, Group, User
+from db.models import AttributeConditionEnum, AttributeRule, Group, GroupUserLink, User
 from db.session import get_session
 from utils.log import get_logger
 
@@ -324,15 +324,27 @@ def apply_rule_actions(actions: dict, user: dict) -> None:
             log.info(f"Auto-granting admin to user {user_id} via attribute rule.")
             db_user.admin = True
 
-    # Group assignment (last matching rule wins)
+    # Group assignment — only if the user is not already in any group
     group_id = actions.get("group")
     if group_id:
-        try:
-            group_add_user(int(group_id), username)
-        except (ValueError, TypeError):
-            log.warning(
-                f"Could not assign user {user_id} to group {group_id}."
+        with get_session() as session:
+            existing = (
+                session.query(GroupUserLink)
+                .filter(GroupUserLink.user_id == db_user.id)
+                .first()
             )
+        if existing:
+            log.info(
+                f"User {user_id} already in group {existing.group_id}, "
+                f"skipping rule-based group assignment to {group_id}."
+            )
+        else:
+            try:
+                group_add_user(int(group_id), username)
+            except (ValueError, TypeError):
+                log.warning(
+                    f"Could not assign user {user_id} to group {group_id}."
+                )
 
 
 def _user_to_pseudo_jwt(user: User) -> dict:
