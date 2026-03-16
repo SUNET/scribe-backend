@@ -23,6 +23,25 @@ Each level represents a scope boundary for administration and provisioning.
 - **Realm**: a login domain within an account
 - **Users**: authenticated users belonging to a realm
 
+### Example system hierarchy
+```
+System
+├─ System administrators
+└─ Accounts
+   ├─ University_A
+   │  ├─ Local administrators
+   │  └─ Realms
+   │     └─ una.se
+   │        └─ Users
+   │
+   └─ University_B
+      ├─ Local administrators
+      └─ Realms
+         ├─ unb.se
+         │  └─ Users
+         └─ stud.unb.se
+            └─ Users
+```
 ---
 
 ## Administrative Roles
