@@ -150,14 +150,14 @@ If a user's attributes match the rule, the rule's actions are applied.
 ## Provisioning Rule Evaluation
 
 Provisioning rules are evaluated during login using the following flow:
-
-1. User login
-2. Identity attributes are received from the IdP
-3. Provisioning rules are evaluated
-4. Conflict resolution is applied
-5. Manual overrides are respected
-6. The final user account state is determined
-
+```
+Login
+ └─ Identity attributes
+     └─ Provisioning rules
+         └─ Conflict resolution
+             └─ Manual override
+                 └─ Final user state
+```
 The final user state determines:
 
 - whether the user is active
