@@ -19,6 +19,7 @@ import collections
 import smtplib
 import ssl
 import threading
+from email.message import EmailMessage
 
 from db.models import NotificationsSent
 from db.session import get_session
@@ -110,8 +111,12 @@ class Notifications:
             server.login(settings.API_SMTP_USERNAME, settings.API_SMTP_PASSWORD)
 
             for email in to_emails:
-                mail_to_send = f"From: {settings.BRANDING_NAME} <{settings.API_SMTP_SENDER}>\nTo: {email}\nSubject: {subject}\n\n{message}"
-                server.sendmail(settings.API_SMTP_SENDER, to_emails, mail_to_send)
+                msg = EmailMessage()
+                msg["From"] = f"{settings.BRANDING_NAME} <{settings.API_SMTP_SENDER}>"
+                msg["To"] = email
+                msg["Subject"] = subject
+                msg.set_content(message)
+                server.sendmail(settings.API_SMTP_SENDER, [email], msg.as_string())
                 logger.info("E-mail notification sent.")
         except Exception as e:
             logger.error(f"Error sending email: {e}")
