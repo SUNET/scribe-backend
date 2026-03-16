@@ -369,7 +369,7 @@ def user_purge_deleted() -> None:
             ).delete()
             session.delete(user)
             log.info(
-                f"User {user.username} permanently deleted (no remaining data)."
+                f"User {user.user_id} permanently deleted (no remaining data)."
             )
 
 
