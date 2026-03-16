@@ -115,7 +115,7 @@ Each rule consists of:
   Example: `email`, `preferred_username`, `affiliation`
 
 - **Condition**  
-  Example: `equals`, `contains`, `starts with`
+  Example: `Equals`, `Contains`, `Starts with`, `Regex match`
 
 - **Match value**
 
