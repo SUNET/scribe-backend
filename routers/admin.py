@@ -114,7 +114,9 @@ async def statistics(
     if admin_user["bofh"]:
         realm = "*"
     else:
-        realm = admin_user["realm"]
+        admin_domains = admin_user.get("admin_domains", "") or ""
+        realms = [d.strip() for d in admin_domains.split(",") if d.strip()]
+        realm = realms if realms else [admin_user["realm"]]
 
     return JSONResponse(content={"result": users_statistics(realm=realm)})
 
@@ -137,11 +139,14 @@ async def list_users(
     """
 
     if admin_user["bofh"]:
-        realm = "*"
+        realms = "*"
     else:
-        realm = admin_user["realm"]
+        admin_domains = admin_user.get("admin_domains", "") or ""
+        realms = [d.strip() for d in admin_domains.split(",") if d.strip()]
+        if not realms:
+            realms = [admin_user["realm"]]
 
-    return JSONResponse(content={"result": user_get_all(realm=realm)})
+    return JSONResponse(content={"result": user_get_all(realm=realms)})
 
 
 @router.put("/admin/{username}")
@@ -715,6 +720,7 @@ async def create_rule(
         assign_to_group=item.assign_to_group,
         owner_domains=item.owner_domains,
         enabled=item.enabled,
+        user_id=admin_user["user_id"],
     )
 
     return JSONResponse(content={"result": rule})
@@ -781,6 +787,7 @@ async def update_rule_endpoint(
         assign_to_group=item.assign_to_group,
         owner_domains=item.owner_domains,
         enabled=item.enabled,
+        user_id=admin_user["user_id"],
     )
 
     if not rule:
@@ -809,7 +816,7 @@ async def delete_rule_endpoint(
                 content={"error": "Not authorized"}, status_code=403
             )
 
-    if not rule_delete(rule_id):
+    if not rule_delete(rule_id, user_id=admin_user["user_id"]):
         return JSONResponse(content={"error": "Rule not found"}, status_code=404)
 
     return JSONResponse(content={"result": {"status": "OK"}})

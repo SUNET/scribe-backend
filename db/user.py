@@ -82,7 +82,7 @@ def user_create(
             if user.deleted:
                 user.deleted = False
                 log.info(
-                    f"User {username} was previously deleted, resetting deleted flag."
+                    f"User {user.user_id} was previously deleted, resetting deleted flag."
                 )
 
             user.last_login = datetime.utcnow()
@@ -98,7 +98,7 @@ def user_create(
             email=email,
         )
 
-        log.info(f"User {username} created with realm {realm}.")
+        log.info(f"User {user_id} created with realm {realm}.")
 
         session.add(user)
 
@@ -158,7 +158,7 @@ def user_delete(username: str) -> bool:
 
             job_remove(job.uuid)
 
-        log.info(f"User {username} soft-deleted.")
+        log.info(f"User {user.user_id} soft-deleted.")
 
         return True
 
@@ -277,13 +277,14 @@ def user_get_public_key(user_id: str) -> Optional[str]:
 
 def user_get_all(realm) -> list:
     """
-    Get all users in a realm.
+    Get all users in a realm or list of realms.
 
     Parameters:
-        realm (str): The realm/domain to filter users by. Use "*" to get all users.
+        realm: The realm(s) to filter users by. Use "*" to get all users,
+               or pass a list of realm strings.
 
     Returns:
-        list: A list of users in the specified realm.
+        list: A list of users in the specified realm(s).
     """
     with get_session() as session:
         if realm == "*":
@@ -291,6 +292,15 @@ def user_get_all(realm) -> list:
                 session.query(User, Group)
                 .outerjoin(GroupUserLink, GroupUserLink.user_id == User.id)
                 .outerjoin(Group, Group.id == GroupUserLink.group_id)
+            )
+            rows = q.all()
+
+        elif isinstance(realm, list):
+            q = (
+                session.query(User, Group)
+                .outerjoin(GroupUserLink, GroupUserLink.user_id == User.id)
+                .outerjoin(Group, Group.id == GroupUserLink.group_id)
+                .filter(User.realm.in_(realm))
             )
             rows = q.all()
 
@@ -769,7 +779,7 @@ def users_statistics(
                         job_queue.append(job_data)
                 else:
                     log.debug(
-                        f"Skipping job {job.uuid} for user {user.username}"
+                        f"Skipping job {job.uuid} for user {user.user_id}"
                         + f" with date {job_date_str}"
                     )
 

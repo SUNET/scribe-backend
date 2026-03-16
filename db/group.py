@@ -439,7 +439,7 @@ def group_add_user(group_id: int, username: str, role: str = "member") -> dict:
             link = GroupUserLink(group_id=group_id, user_id=user_id, role=role)
             session.add(link)
 
-        log.info(f"User {username} added to group {group_id} with role {role}.")
+        log.info(f"User {user_id} added to group {group_id} with role {role}.")
 
         return {"group_id": group_id, "user_id": user_id, "role": role}
 
