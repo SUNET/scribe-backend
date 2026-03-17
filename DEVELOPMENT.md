@@ -206,7 +206,7 @@ Identity attributes → Provisioning rules → Conflict resolution → Manual ov
 System invariants:
 
 - The system hierarchy (System → Account → Realm → User) defines all scope boundaries for provisioning and administration.
-- Provisioning rules operate only within the scope of the user's account and realm.
+- Provisioning rules are limited by the administrator's realm permissions and can be configured to apply to a subset of those realms.
 - Provisioning runs on every login.
 - All enabled rules are evaluated.
 - Deactivate overrides Activate.
