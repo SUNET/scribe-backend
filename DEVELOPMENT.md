@@ -4,7 +4,7 @@ This document describes the core architecture, control model, and provisioning l
 It is intended for developers and system administrators working on the codebase.
 
 Sunet Scribe is a multi-tenant system using federated authentication, typically via SWAMID / SAML.  
-User accounts are created and managed automatically through provisioning rules, while administrators retain the ability to override automated decisions.
+User accounts are created automatically at first login and managed automatically through provisioning rules, while administrators retain the ability to override automated decisions.
 
 ---
 
