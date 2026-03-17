@@ -42,6 +42,7 @@ System
          └─ stud.unb.se
             └─ Users
 ```
+
 ---
 
 ## Administrative Roles
@@ -90,12 +91,12 @@ Administrative scope determines which users an administrator can manage.
 
 Example:
 
-**Account:** University_A
+**Account:** University_B
 
 **Local administrator scope:**
 
-- una.se
-- med.una.se
+- unb.se
+- stud.unb.se
 
 In this example, the administrator can only manage users whose login domain belongs to these realms.
 
@@ -204,6 +205,7 @@ Identity attributes → Provisioning rules → Conflict resolution → Manual ov
 
 System invariants:
 
+- The system hierarchy (System → Account → Realm → User) defines all scope boundaries for provisioning and administration.
 - Provisioning rules operate only within the scope of the user's account and realm.
 - Provisioning runs on every login.
 - All enabled rules are evaluated.
