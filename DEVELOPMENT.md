@@ -55,7 +55,7 @@ System administrators manage the entire installation.
 
 They can:
 
-- create and manage accounts
+- create and manage accounts, including setting realms for an account
 - configure system-wide settings
 - assign local administrators
 - view all realms and users
