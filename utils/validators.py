@@ -155,3 +155,17 @@ class TranscriptionJobUpdateRequest(BaseModel):
 class TranscriptionResultRequest(BaseModel):
     format: str = ""
     result: str | dict
+
+
+class CreateAnnouncementRequest(BaseModel):
+    message: str
+    starts_at: Optional[str] = None
+    ends_at: Optional[str] = None
+    enabled: bool = True
+
+
+class UpdateAnnouncementRequest(BaseModel):
+    message: Optional[str] = None
+    starts_at: Optional[str] = None
+    ends_at: Optional[str] = None
+    enabled: Optional[bool] = None

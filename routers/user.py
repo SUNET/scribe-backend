@@ -16,6 +16,7 @@
 # limitations under the License.
 
 from auth.oidc import get_current_user
+from db.announcement import announcement_get_active
 from db.user import (
     user_get_email,
     user_get_private_key,
@@ -54,7 +55,9 @@ async def get_user_info(
         JSONResponse: The user information.
     """
 
-    return JSONResponse(content={"result": user})
+    result = dict(user)
+    result["announcements"] = announcement_get_active()
+    return JSONResponse(content={"result": result})
 
 
 @router.put("/me")
