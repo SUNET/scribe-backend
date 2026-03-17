@@ -834,3 +834,46 @@ class OnboardingAttribute(SQLModel, table=True):
             "description": self.description,
             "example": self.example,
         }
+
+
+class Announcement(SQLModel, table=True):
+    """
+    Model representing a system-wide announcement banner.
+    All times are in server-local time.
+    """
+
+    __tablename__ = "announcements"
+
+    id: Optional[int] = Field(default=None, primary_key=True, description="Primary key")
+    message: str = Field(description="Announcement message (may contain HTML links)")
+    starts_at: Optional[datetime] = Field(
+        default=None,
+        description="When the announcement becomes visible (server time, NULL = immediate)",
+    )
+    ends_at: Optional[datetime] = Field(
+        default=None,
+        description="When the announcement stops being visible (server time, NULL = no end)",
+    )
+    enabled: bool = Field(
+        default=True,
+        description="Whether this announcement is currently active",
+    )
+    created_at: datetime = Field(
+        default_factory=datetime.utcnow,
+        description="Creation timestamp",
+    )
+    created_by: Optional[str] = Field(
+        default=None,
+        description="Username of the admin who created this announcement",
+    )
+
+    def as_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "message": self.message,
+            "starts_at": str(self.starts_at) if self.starts_at else None,
+            "ends_at": str(self.ends_at) if self.ends_at else None,
+            "enabled": self.enabled,
+            "created_at": str(self.created_at),
+            "created_by": self.created_by,
+        }

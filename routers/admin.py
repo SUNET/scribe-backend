@@ -57,6 +57,12 @@ from db.onboarding_attributes import (
     attribute_add,
     attribute_delete,
 )
+from db.announcement import (
+    announcement_create as announcement_create_db,
+    announcement_get_all,
+    announcement_update as announcement_update_db,
+    announcement_delete as announcement_delete_db,
+)
 
 from db.analytics import (
     log_page_view,
@@ -87,6 +93,8 @@ from utils.validators import (
     UpdateAttributeRuleRequest,
     CreateOnboardingAttributeRequest,
     TestRulesRequest,
+    CreateAnnouncementRequest,
+    UpdateAnnouncementRequest,
 )
 
 log = get_logger()
@@ -1111,3 +1119,89 @@ async def analytics_stats(
     if not admin_user.get("bofh"):
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
     return JSONResponse(content={"result": get_total_stats()})
+
+
+# ── Announcements ───────────────────────────────────────────────────────
+
+
+@router.get("/admin/announcements")
+async def list_announcements(
+    request: Request,
+    admin_user: dict = Depends(get_current_admin_user),
+) -> JSONResponse:
+    """List all announcements. BOFH only."""
+
+    if not admin_user.get("bofh"):
+        return JSONResponse(content={"error": "User not authorized"}, status_code=403)
+
+    return JSONResponse(content={"result": announcement_get_all()})
+
+
+@router.post("/admin/announcements")
+async def create_announcement(
+    request: Request,
+    announcement: CreateAnnouncementRequest,
+    admin_user: dict = Depends(get_current_admin_user),
+) -> JSONResponse:
+    """Create a new announcement. BOFH only."""
+
+    if not admin_user.get("bofh"):
+        return JSONResponse(content={"error": "User not authorized"}, status_code=403)
+
+    if not announcement.message:
+        return JSONResponse(
+            content={"error": "Message is required"}, status_code=400
+        )
+
+    created = announcement_create_db(
+        message=announcement.message,
+        starts_at=announcement.starts_at,
+        ends_at=announcement.ends_at,
+        enabled=announcement.enabled,
+        created_by=admin_user.get("username"),
+    )
+
+    return JSONResponse(content={"result": created})
+
+
+@router.put("/admin/announcements/{announcement_id}")
+async def update_announcement(
+    request: Request,
+    announcement_id: int,
+    announcement_update: UpdateAnnouncementRequest,
+    admin_user: dict = Depends(get_current_admin_user),
+) -> JSONResponse:
+    """Update an announcement. BOFH only."""
+
+    if not admin_user.get("bofh"):
+        return JSONResponse(content={"error": "User not authorized"}, status_code=403)
+
+    updated = announcement_update_db(
+        announcement_id,
+        message=announcement_update.message,
+        starts_at=announcement_update.starts_at,
+        ends_at=announcement_update.ends_at,
+        enabled=announcement_update.enabled,
+    )
+
+    if not updated:
+        return JSONResponse(content={"error": "Announcement not found"}, status_code=404)
+
+    return JSONResponse(content={"result": updated})
+
+
+@router.delete("/admin/announcements/{announcement_id}")
+async def delete_announcement(
+    request: Request,
+    announcement_id: int,
+    admin_user: dict = Depends(get_current_admin_user),
+) -> JSONResponse:
+    """Delete an announcement. BOFH only."""
+
+    if not admin_user.get("bofh"):
+        return JSONResponse(content={"error": "User not authorized"}, status_code=403)
+
+    if not announcement_delete_db(announcement_id):
+        return JSONResponse(content={"error": "Announcement not found"}, status_code=404)
+
+    return JSONResponse(content={"result": {"status": "OK"}})
