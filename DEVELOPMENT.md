@@ -144,7 +144,7 @@ Each rule consists of:
   - `Deactivate`
   - `Assign user to group`
 
-If a user's attributes match the rule, the rule's actions are applied. If no rules applies or no rules are created (or prior to V1.3.0) the user account is left disabled and not part of any group. In that case an administrator needs to manually provision the user.
+If a user's attributes match the rule, the rule's actions are applied. If no rules applies or no rules are defined (or prior to v1.3.0) the user account is left disabled and not assigned to any group. In that case an administrator needs to manually provision the user.
 
 ---
 
