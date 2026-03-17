@@ -124,7 +124,7 @@ These attributes are used by the provisioning engine to determine how a user acc
 
 ## Provisioning Model
 
-From v.1.3.0 user accounts are created and updated automatically through **provisioning rules**.
+From v.1.3.0 and onwards user accounts can be created and updated automatically through **provisioning rules**.
 
 Provisioning rules are evaluated every time a user logs in.
 
