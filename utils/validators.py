@@ -159,6 +159,7 @@ class TranscriptionResultRequest(BaseModel):
 
 class CreateAnnouncementRequest(BaseModel):
     message: str
+    severity: Optional[str] = "info"
     starts_at: Optional[str] = None
     ends_at: Optional[str] = None
     enabled: bool = True
@@ -166,6 +167,7 @@ class CreateAnnouncementRequest(BaseModel):
 
 class UpdateAnnouncementRequest(BaseModel):
     message: Optional[str] = None
+    severity: Optional[str] = None
     starts_at: Optional[str] = None
     ends_at: Optional[str] = None
     enabled: Optional[bool] = None

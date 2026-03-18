@@ -836,6 +836,16 @@ class OnboardingAttribute(SQLModel, table=True):
         }
 
 
+class AnnouncementSeverityEnum(str, Enum):
+    """
+    Enum representing the severity level of an announcement.
+    """
+
+    INFO = "info"
+    MAINTENANCE = "maintenance"
+    MAJOR_INCIDENT = "major_incident"
+
+
 class Announcement(SQLModel, table=True):
     """
     Model representing a system-wide announcement banner.
@@ -846,6 +856,11 @@ class Announcement(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True, description="Primary key")
     message: str = Field(description="Announcement message (may contain HTML links)")
+    severity: AnnouncementSeverityEnum = Field(
+        default=AnnouncementSeverityEnum.INFO,
+        sa_column=Field(sa_column=SQLAlchemyEnum(AnnouncementSeverityEnum)),
+        description="Severity level: info, maintenance, or major_incident",
+    )
     starts_at: Optional[datetime] = Field(
         default=None,
         description="When the announcement becomes visible (server time, NULL = immediate)",
@@ -871,6 +886,7 @@ class Announcement(SQLModel, table=True):
         return {
             "id": self.id,
             "message": self.message,
+            "severity": self.severity.value if hasattr(self.severity, "value") else (self.severity or "info"),
             "starts_at": str(self.starts_at) if self.starts_at else None,
             "ends_at": str(self.ends_at) if self.ends_at else None,
             "enabled": self.enabled,
