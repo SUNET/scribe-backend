@@ -55,6 +55,7 @@ async def list_announcements(
     """
 
     if not admin_user.get("bofh"):
+        log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to announcements")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
     return JSONResponse(content={"result": announcement_get_all()})
@@ -79,6 +80,7 @@ async def create_announcement(
     """
 
     if not admin_user.get("bofh"):
+        log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to announcements")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
     if not announcement.message:
@@ -117,6 +119,7 @@ async def update_announcement(
     """
 
     if not admin_user.get("bofh"):
+        log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to announcements")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
     updated = announcement_update_db(
@@ -155,6 +158,7 @@ async def delete_announcement(
     """
 
     if not admin_user.get("bofh"):
+        log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to announcements")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
     if not announcement_delete_db(announcement_id):

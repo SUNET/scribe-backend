@@ -170,6 +170,7 @@ async def get_rule(
     if not admin_user["bofh"]:
         allowed = _get_admin_allowed_realms(admin_user)
         if not _rule_realm_overlaps(rule.get("realm"), allowed):
+            log.warning(f"Admin {admin_user['user_id']} denied access to rule {rule_id} (realm mismatch)")
             return JSONResponse(content={"error": "Not authorized"}, status_code=403)
 
     return JSONResponse(content={"result": rule})
@@ -205,6 +206,7 @@ async def update_rule_endpoint(
         allowed = _get_admin_allowed_realms(admin_user)
 
         if not _rule_realm_overlaps(existing.get("realm"), allowed):
+            log.warning(f"Admin {admin_user['user_id']} denied update access to rule {rule_id} (realm mismatch)")
             return JSONResponse(content={"error": "Not authorized"}, status_code=403)
 
         # Prevent non-BOFH from moving rule to a realm they don't manage
@@ -261,6 +263,7 @@ async def delete_rule_endpoint(
         allowed = _get_admin_allowed_realms(admin_user)
 
         if not _rule_realm_overlaps(existing.get("realm"), allowed):
+            log.warning(f"Admin {admin_user['user_id']} denied delete access to rule {rule_id} (realm mismatch)")
             return JSONResponse(content={"error": "Not authorized"}, status_code=403)
 
     if not rule_delete(rule_id, user_id=admin_user["user_id"]):
@@ -338,6 +341,7 @@ async def create_attribute(
     """
 
     if not admin_user["bofh"]:
+        log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to create attribute")
         return JSONResponse(
             content={"error": "Only BOFH can manage attributes"}, status_code=403
         )
@@ -378,6 +382,7 @@ async def delete_attribute(
     """
 
     if not admin_user["bofh"]:
+        log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to delete attribute {attribute_id}")
         return JSONResponse(
             content={"error": "Only BOFH can manage attributes"}, status_code=403
         )

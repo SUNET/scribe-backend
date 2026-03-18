@@ -129,11 +129,26 @@ async def modify_user(
     Returns:
         JSONResponse: The result of the operation.
     """
-    if not (user_id := user_get(username=username)["user_id"]):
+    target_user = user_get(username=username)
+    if not target_user or not target_user.get("user_id"):
         return JSONResponse(
             content={"error": "User not found"},
             status_code=404,
         )
+
+    if not admin_user["bofh"]:
+        admin_domains = admin_user.get("admin_domains", "") or ""
+        allowed_realms = [d.strip() for d in admin_domains.split(",") if d.strip()]
+        if not allowed_realms:
+            allowed_realms = [admin_user["realm"]]
+        if target_user.get("realm") not in allowed_realms:
+            log.warning(f"Admin {admin_user['user_id']} denied modify access to user (realm mismatch)")
+            return JSONResponse(
+                content={"error": "Not authorized to modify this user"},
+                status_code=403,
+            )
+
+    user_id = target_user["user_id"]
 
     if item.active is not None:
         user_update(
@@ -174,6 +189,24 @@ async def delete_user(
     Returns:
         JSONResponse: The result of the operation.
     """
+
+    if not admin_user["bofh"]:
+        target_user = user_get(username=username)
+        if not target_user or not target_user.get("user_id"):
+            return JSONResponse(
+                content={"error": "User not found"},
+                status_code=404,
+            )
+        admin_domains = admin_user.get("admin_domains", "") or ""
+        allowed_realms = [d.strip() for d in admin_domains.split(",") if d.strip()]
+        if not allowed_realms:
+            allowed_realms = [admin_user["realm"]]
+        if target_user.get("realm") not in allowed_realms:
+            log.warning(f"Admin {admin_user['user_id']} denied delete access to user (realm mismatch)")
+            return JSONResponse(
+                content={"error": "Not authorized to delete this user"},
+                status_code=403,
+            )
 
     if not user_delete(username):
         return JSONResponse(

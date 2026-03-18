@@ -88,6 +88,7 @@ async def create_customer(
     """
 
     if not admin_user["bofh"]:
+        log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to create customer")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
     if not item.partner_id or not item.name:
@@ -155,6 +156,7 @@ async def update_customer(
     """
 
     if not admin_user["bofh"]:
+        log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to update customer {customer_id}")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
     customer = customer_update(
@@ -196,6 +198,7 @@ async def delete_customer(
     """
 
     if not admin_user["bofh"]:
+        log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to delete customer {customer_id}")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
     if not customer_delete(customer_id):
@@ -221,6 +224,7 @@ async def list_realms(
     """
 
     if not admin_user["bofh"]:
+        log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to list realms")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
     return JSONResponse(content={"result": get_all_realms()})
@@ -245,6 +249,7 @@ async def customer_stats(
     """
 
     if not admin_user["bofh"] and not admin_user["admin"]:
+        log.warning(f"User {admin_user['user_id']} denied access to customer stats {customer_id}")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
     if not customer_get(customer_id):
@@ -270,6 +275,7 @@ async def export_customers_csv(
     """
 
     if not admin_user["bofh"] and not admin_user["admin"]:
+        log.warning(f"User {admin_user['user_id']} denied access to export customers CSV")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
     if not (csv_data := export_customers_to_csv(admin_user).encode("utf-8")):
