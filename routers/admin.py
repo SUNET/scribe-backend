@@ -66,7 +66,6 @@ from db.announcement import (
 )
 
 from db.analytics import (
-    log_page_view,
     get_page_views,
     get_page_views_summary,
     get_views_per_day,
@@ -1080,27 +1079,6 @@ async def export_customers_csv(
         headers={"Content-Disposition": 'attachment; filename="customers_export.csv"'},
     )
 
-
-@router.post("/admin/analytics/log", include_in_schema=False)
-async def analytics_log(
-    request: Request,
-    current_user: dict = Depends(get_current_user),
-) -> JSONResponse:
-    """
-    Log an anonymous page view.
-
-    Parameters:
-        request (Request): The incoming HTTP request.
-        current_user (dict): The current user.
-
-    Returns:
-        JSONResponse: The result of the operation.
-    """
-    body = await request.json()
-    path = body.get("path", "")
-    if path:
-        log_page_view(path)
-    return JSONResponse(content={"result": "ok"})
 
 
 @router.get("/admin/analytics/views")

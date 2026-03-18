@@ -26,6 +26,7 @@ from fastapi_utils.tasks import repeat_every
 from starlette.middleware.sessions import SessionMiddleware
 
 from auth.oidc import RefreshToken, oauth, verify_token, verify_user
+from db.analytics import log_page_view
 
 from db.job import job_cleanup
 from db.attribute_rules import apply_rule_actions, evaluate_rules
@@ -101,6 +102,57 @@ app.add_middleware(
 )
 
 app.add_middleware(SessionMiddleware, settings.API_SECRET_KEY, https_only=False)
+
+# Map (method, route_pattern) to action names for analytics.
+# Only mutating/meaningful endpoints are tracked.
+_prefix = settings.API_PREFIX
+ANALYTICS_ROUTE_MAP = {
+    ("POST", f"{_prefix}/transcriber"): "upload",
+    ("DELETE", f"{_prefix}/transcriber/{{job_id}}"): "delete_job",
+    ("PUT", f"{_prefix}/transcriber/{{job_id}}"): "transcription",
+    ("GET", f"{_prefix}/transcriber/{{job_id}}/result/{{output_format}}"): "export",
+    ("PUT", f"{_prefix}/admin/{{username}}"): "modify_user",
+    ("DELETE", f"{_prefix}/admin/{{username}}"): "remove_user",
+    ("POST", f"{_prefix}/admin/groups"): "create_group",
+    ("PUT", f"{_prefix}/admin/groups/{{group_id}}"): "edit_group",
+    ("DELETE", f"{_prefix}/admin/groups/{{group_id}}"): "delete_group",
+    ("POST", f"{_prefix}/admin/groups/{{group_id}}/users/{{username}}"): "add_group_user",
+    ("DELETE", f"{_prefix}/admin/groups/{{group_id}}/users/{{username}}"): "remove_group_user",
+    ("POST", f"{_prefix}/admin/rules"): "create_rule",
+    ("PUT", f"{_prefix}/admin/rules/{{rule_id}}"): "edit_rule",
+    ("DELETE", f"{_prefix}/admin/rules/{{rule_id}}"): "delete_rule",
+    ("POST", f"{_prefix}/admin/attributes"): "create_attribute",
+    ("DELETE", f"{_prefix}/admin/attributes/{{attribute_id}}"): "delete_attribute",
+    ("POST", f"{_prefix}/admin/customers"): "create_customer",
+    ("PUT", f"{_prefix}/admin/customers/{{customer_id}}"): "edit_customer",
+    ("DELETE", f"{_prefix}/admin/customers/{{customer_id}}"): "delete_customer",
+    ("POST", f"{_prefix}/admin/announcements"): "create_announcement",
+    ("PUT", f"{_prefix}/admin/announcements/{{announcement_id}}"): "edit_announcement",
+    ("DELETE", f"{_prefix}/admin/announcements/{{announcement_id}}"): "delete_announcement",
+}
+
+
+@app.middleware("http")
+async def analytics_middleware(request: Request, call_next):
+    response = await call_next(request)
+
+    if response.status_code < 200 or response.status_code >= 300:
+        return response
+
+    route = request.scope.get("route")
+    if route is None:
+        return response
+
+    action = ANALYTICS_ROUTE_MAP.get((request.method, route.path))
+    if action:
+        try:
+            log_page_view(f"/action/{action}")
+        except Exception:
+            pass
+
+    return response
+
+
 app.include_router(transcriber_router, prefix=settings.API_PREFIX, tags=["transcriber"])
 app.include_router(job_router, prefix=settings.API_PREFIX, tags=["job"])
 app.include_router(user_router, prefix=settings.API_PREFIX, tags=["user"])
