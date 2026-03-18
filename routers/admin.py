@@ -14,6 +14,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+#
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, Response
@@ -659,14 +660,22 @@ async def delete_customer(
     return JSONResponse(content={"result": {"status": "OK"}})
 
 
-# ── Attribute Rules ──────────────────────────────────────────────────────
-
-
 def _get_admin_allowed_realms(admin_user: dict) -> list[str]:
-    """Return the list of realms a non-BOFH admin may manage rules for."""
+    """
+    Return the list of realms a non-BOFH admin may manage rules for.
+
+    Parameters:
+        admin_user (dict): The admin user dict.
+
+    Returns:
+        list[str]: The list of allowed realms.
+    """
+
     realms = set()
+
     if admin_user.get("realm"):
         realms.add(admin_user["realm"])
+
     for d in (admin_user.get("admin_domains") or "").split(","):
         d = d.strip()
         if d:
@@ -675,19 +684,39 @@ def _get_admin_allowed_realms(admin_user: dict) -> list[str]:
 
 
 def _rule_realm_overlaps(rule_realm: str | None, allowed: list[str]) -> bool:
-    """Check if any of the rule's comma-separated realms overlap with allowed."""
+    """
+    Check if any of the rule's comma-separated realms overlap with allowed.
+
+    Parameters:
+        rule_realm (str | None): The rule's realm(s) as a comma-separated string.
+
+    Returns:
+        bool: True if any realm overlaps with allowed, False otherwise.
+    """
+
     if not rule_realm:
         return True
+
     rule_realms = {r.strip() for r in rule_realm.split(",") if r.strip()}
+
     return bool(rule_realms & set(allowed))
 
 
-@router.get("/admin/rules")
+@router.get("/admin/rules", include_in_schema=False)
 async def list_rules(
     request: Request,
     admin_user: dict = Depends(get_current_admin_user),
 ) -> JSONResponse:
-    """List all attribute rules."""
+    """
+    List all attribute rules.
+
+    Parameters:
+        request (Request): The incoming HTTP request.
+        admin_user (dict): The current user.
+
+    Returns:
+        JSONResponse: The list of attribute rules.
+    """
 
     if admin_user["bofh"]:
         realm = "*"
@@ -703,7 +732,9 @@ async def create_rule(
     item: CreateAttributeRuleRequest,
     admin_user: dict = Depends(get_current_admin_user),
 ) -> JSONResponse:
-    """Create a new attribute rule."""
+    """
+    Create a new attribute rule.
+    """
 
     if not item.name or not item.attribute_name or not item.attribute_value:
         return JSONResponse(
@@ -740,45 +771,59 @@ async def get_rule(
     rule_id: int,
     admin_user: dict = Depends(get_current_admin_user),
 ) -> JSONResponse:
-    """Get a single attribute rule."""
+    """
+    Get a single attribute rule.
+    """
 
     rule = rule_get(rule_id)
+
     if not rule:
         return JSONResponse(content={"error": "Rule not found"}, status_code=404)
 
     if not admin_user["bofh"]:
         allowed = _get_admin_allowed_realms(admin_user)
         if not _rule_realm_overlaps(rule.get("realm"), allowed):
-            return JSONResponse(
-                content={"error": "Not authorized"}, status_code=403
-            )
+            return JSONResponse(content={"error": "Not authorized"}, status_code=403)
 
     return JSONResponse(content={"result": rule})
 
 
-@router.put("/admin/rules/{rule_id}")
+@router.put("/admin/rules/{rule_id}", include_in_schema=False)
 async def update_rule_endpoint(
     request: Request,
     rule_id: int,
     item: UpdateAttributeRuleRequest,
     admin_user: dict = Depends(get_current_admin_user),
 ) -> JSONResponse:
-    """Update an attribute rule."""
+    """
+    Update an attribute rule.
+
+    For non-BOFH admins, if the rule's realm(s) overlap with the admin's allowed realms,
+    they can update the rule but cannot move it to a realm they don't manage.
+
+    Parameters:
+        request: The incoming HTTP request.
+        rule_id: The ID of the rule to update.
+        item: UpdateAttributeRuleRequest containing the updated rule details.
+        admin_user: The current admin user.
+
+    Returns:
+        JSONResponse with the result of the operation.
+    """
 
     if not admin_user["bofh"]:
-        existing = rule_get(rule_id)
-        if not existing:
-            return JSONResponse(
-                content={"error": "Rule not found"}, status_code=404
-            )
+        if not (existing := rule_get(rule_id)):
+            return JSONResponse(content={"error": "Rule not found"}, status_code=404)
+
         allowed = _get_admin_allowed_realms(admin_user)
+
         if not _rule_realm_overlaps(existing.get("realm"), allowed):
-            return JSONResponse(
-                content={"error": "Not authorized"}, status_code=403
-            )
+            return JSONResponse(content={"error": "Not authorized"}, status_code=403)
+
         # Prevent non-BOFH from moving rule to a realm they don't manage
         if item.realm is not None:
             new_realms = {r.strip() for r in item.realm.split(",") if r.strip()}
+
             if not new_realms.issubset(set(allowed)):
                 item.realm = existing["realm"]
 
@@ -804,25 +849,32 @@ async def update_rule_endpoint(
     return JSONResponse(content={"result": rule})
 
 
-@router.delete("/admin/rules/{rule_id}")
+@router.delete("/admin/rules/{rule_id}", include_in_schema=False)
 async def delete_rule_endpoint(
     request: Request,
     rule_id: int,
     admin_user: dict = Depends(get_current_admin_user),
 ) -> JSONResponse:
-    """Delete an attribute rule."""
+    """
+    Delete an attribute rule.
+
+    Parameters:
+        request: The incoming HTTP request.
+        rule_id: The ID of the rule to delete.
+        admin_user: The current admin user.
+
+    Returns:
+        JSONResponse with the result of the operation.
+    """
 
     if not admin_user["bofh"]:
-        existing = rule_get(rule_id)
-        if not existing:
-            return JSONResponse(
-                content={"error": "Rule not found"}, status_code=404
-            )
+        if not (existing := rule_get(rule_id)):
+            return JSONResponse(content={"error": "Rule not found"}, status_code=404)
+
         allowed = _get_admin_allowed_realms(admin_user)
+
         if not _rule_realm_overlaps(existing.get("realm"), allowed):
-            return JSONResponse(
-                content={"error": "Not authorized"}, status_code=403
-            )
+            return JSONResponse(content={"error": "Not authorized"}, status_code=403)
 
     if not rule_delete(rule_id, user_id=admin_user["user_id"]):
         return JSONResponse(content={"error": "Rule not found"}, status_code=404)
@@ -830,18 +882,26 @@ async def delete_rule_endpoint(
     return JSONResponse(content={"result": {"status": "OK"}})
 
 
-@router.post("/admin/rules/test")
+@router.post("/admin/rules/test", include_in_schema=False)
 async def test_rules_endpoint(
     request: Request,
     item: TestRulesRequest,
     admin_user: dict = Depends(get_current_admin_user),
 ) -> JSONResponse:
-    """Test which users would be matched by the given rules."""
+    """
+    Test which users would be matched by the given rules.
+
+    Parameters:
+        request: The incoming HTTP request.
+        item: TestRulesRequest containing the list of rule IDs to test.
+        admin_user: The current admin user.
+
+    Returns:
+        JSONResponse with the list of matched users.
+    """
 
     if not item.rule_ids:
-        return JSONResponse(
-            content={"error": "No rule IDs provided"}, status_code=400
-        )
+        return JSONResponse(content={"error": "No rule IDs provided"}, status_code=400)
 
     if admin_user["bofh"]:
         realm = "*"
@@ -854,26 +914,41 @@ async def test_rules_endpoint(
     return JSONResponse(content={"result": matches})
 
 
-# ── Onboarding Attributes ───────────────────────────────────────────────
-
-
-@router.get("/admin/attributes")
+@router.get("/admin/attributes", include_in_schema=False)
 async def list_attributes(
     request: Request,
     admin_user: dict = Depends(get_current_admin_user),
 ) -> JSONResponse:
-    """List all supported onboarding attributes."""
+    """
+    List all supported onboarding attributes.
+
+    Parameters:
+        request (Request): The incoming HTTP request.
+        admin_user (dict): The current user.
+
+    Returns:
+        JSONResponse: The list of onboarding attributes.
+    """
 
     return JSONResponse(content={"result": attribute_get_all()})
 
 
-@router.post("/admin/attributes")
+@router.post("/admin/attributes", include_in_schema=False)
 async def create_attribute(
     request: Request,
     item: CreateOnboardingAttributeRequest,
     admin_user: dict = Depends(get_current_admin_user),
 ) -> JSONResponse:
-    """Add a new onboarding attribute. BOFH only."""
+    """
+    Add a new onboarding attribute. BOFH only.
+
+    Parameters:
+        request (Request): The incoming HTTP request.
+        admin_user (dict): The current user.
+
+    Returns:
+        JSONResponse: The result of the operation.
+    """
 
     if not admin_user["bofh"]:
         return JSONResponse(
@@ -885,10 +960,11 @@ async def create_attribute(
             content={"error": "Attribute name is required"}, status_code=400
         )
 
-    attr = attribute_add(
-        name=item.name, description=item.description, example=item.example
-    )
-    if not attr:
+    if not (
+        attr := attribute_add(
+            name=item.name, description=item.description, example=item.example
+        )
+    ):
         return JSONResponse(
             content={"error": "Attribute already exists"}, status_code=409
         )
@@ -896,13 +972,23 @@ async def create_attribute(
     return JSONResponse(content={"result": attr})
 
 
-@router.delete("/admin/attributes/{attribute_id}")
+@router.delete("/admin/attributes/{attribute_id}", include_in_schema=False)
 async def delete_attribute(
     request: Request,
     attribute_id: int,
     admin_user: dict = Depends(get_current_admin_user),
 ) -> JSONResponse:
-    """Delete an onboarding attribute. BOFH only."""
+    """
+    Delete an onboarding attribute. BOFH only.
+
+    Parameters:
+        request (Request): The incoming HTTP request.
+        attribute_id (int): The ID of the attribute to delete.
+        admin_user (dict): The current user.
+
+    Returns:
+        JSONResponse: The result of the operation.
+    """
 
     if not admin_user["bofh"]:
         return JSONResponse(
@@ -910,9 +996,7 @@ async def delete_attribute(
         )
 
     if not attribute_delete(attribute_id):
-        return JSONResponse(
-            content={"error": "Attribute not found"}, status_code=404
-        )
+        return JSONResponse(content={"error": "Attribute not found"}, status_code=404)
 
     return JSONResponse(content={"result": {"status": "OK"}})
 
@@ -997,13 +1081,20 @@ async def export_customers_csv(
     )
 
 
-@router.post("/admin/analytics/log")
+@router.post("/admin/analytics/log", include_in_schema=False)
 async def analytics_log(
     request: Request,
     current_user: dict = Depends(get_current_user),
 ) -> JSONResponse:
     """
     Log an anonymous page view.
+
+    Parameters:
+        request (Request): The incoming HTTP request.
+        current_user (dict): The current user.
+
+    Returns:
+        JSONResponse: The result of the operation.
     """
     body = await request.json()
     path = body.get("path", "")
@@ -1021,25 +1112,36 @@ async def analytics_views(
     """
     Get page views grouped by path and day. BOFH only.
     """
+
     if not admin_user.get("bofh"):
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
+
     return JSONResponse(content={"result": get_page_views(days=days)})
 
 
-@router.get("/admin/analytics/summary")
+@router.get("/admin/analytics/summary", include_in_schema=False)
 async def analytics_summary(
     request: Request,
     admin_user: dict = Depends(get_current_admin_user),
 ) -> JSONResponse:
     """
     Get total views per page (all time and last 30 days). BOFH only.
+
+    Parameters:
+        request (Request): The incoming HTTP request.
+        admin_user (dict): The current user.
+
+    Returns:
+        JSONResponse: The summary of page views.
     """
+
     if not admin_user.get("bofh"):
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
+
     return JSONResponse(content={"result": get_page_views_summary()})
 
 
-@router.get("/admin/analytics/daily")
+@router.get("/admin/analytics/daily", include_in_schema=False)
 async def analytics_daily(
     request: Request,
     admin_user: dict = Depends(get_current_admin_user),
@@ -1047,13 +1149,23 @@ async def analytics_daily(
 ) -> JSONResponse:
     """
     Get total views per day. BOFH only.
+
+    Parameters:
+        request (Request): The incoming HTTP request.
+        admin_user (dict): The current user.
+        days (int): Number of days to include in the aggregation.
+
+    Returns:
+        JSONResponse: The daily views data.
     """
+
     if not admin_user.get("bofh"):
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
+
     return JSONResponse(content={"result": get_views_per_day(days=days)})
 
 
-@router.get("/admin/analytics/recent")
+@router.get("/admin/analytics/recent", include_in_schema=False)
 async def analytics_recent(
     request: Request,
     admin_user: dict = Depends(get_current_admin_user),
@@ -1061,13 +1173,23 @@ async def analytics_recent(
 ) -> JSONResponse:
     """
     Get most recent page views. BOFH only.
+
+    Parameters:
+        request (Request): The incoming HTTP request.
+        admin_user (dict): The current user.
+        limit (int): Maximum number of recent views to return.
+
+    Returns:
+        JSONResponse: The list of recent page views.
     """
+
     if not admin_user.get("bofh"):
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
+
     return JSONResponse(content={"result": get_recent_views(limit=limit)})
 
 
-@router.get("/admin/analytics/heatmap")
+@router.get("/admin/analytics/heatmap", include_in_schema=False)
 async def analytics_heatmap(
     request: Request,
     admin_user: dict = Depends(get_current_admin_user),
@@ -1075,13 +1197,23 @@ async def analytics_heatmap(
 ) -> JSONResponse:
     """
     Get views grouped by day-of-week and hour-of-day for heatmap. BOFH only.
+
+    Parameters:
+        request (Request): The incoming HTTP request.
+        admin_user (dict): The current user.
+        days (int): Number of days to include in the aggregation.
+
+    Returns:
+        JSONResponse: The heatmap data.
     """
+
     if not admin_user.get("bofh"):
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
+
     return JSONResponse(content={"result": get_hourly_heatmap(days=days)})
 
 
-@router.get("/admin/analytics/hourly")
+@router.get("/admin/analytics/hourly", include_in_schema=False)
 async def analytics_hourly(
     request: Request,
     admin_user: dict = Depends(get_current_admin_user),
@@ -1089,47 +1221,81 @@ async def analytics_hourly(
 ) -> JSONResponse:
     """
     Get views per hour-of-day. BOFH only.
+
+    Parameters:
+        request (Request): The incoming HTTP request.
+        admin_user (dict): The current user.
+        days (int): Number of days to include in the aggregation.
+
+    Returns:
+        JSONResponse: The hourly distribution of views.
     """
+
     if not admin_user.get("bofh"):
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
+
     return JSONResponse(content={"result": get_hourly_distribution(days=days)})
 
 
-@router.get("/admin/analytics/wow")
+@router.get("/admin/analytics/wow", include_in_schema=False)
 async def analytics_week_over_week(
     request: Request,
     admin_user: dict = Depends(get_current_admin_user),
 ) -> JSONResponse:
     """
     Get week-over-week comparison. BOFH only.
+
+    Parameters:
+        request (Request): The incoming HTTP request.
+        admin_user (dict): The current user.
+
+    Returns:
+        JSONResponse: The week-over-week comparison data.
     """
+
     if not admin_user.get("bofh"):
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
+
     return JSONResponse(content={"result": get_week_over_week()})
 
 
-@router.get("/admin/analytics/stats")
+@router.get("/admin/analytics/stats", include_in_schema=False)
 async def analytics_stats(
     request: Request,
     admin_user: dict = Depends(get_current_admin_user),
 ) -> JSONResponse:
     """
     Get aggregate analytics stats for summary cards. BOFH only.
+
+    Parameters:
+        request (Request): The incoming HTTP request.
+        admin_user (dict): The current user.
+
+    Returns:
+        JSONResponse: The aggregate analytics stats.
     """
+
     if not admin_user.get("bofh"):
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
+
     return JSONResponse(content={"result": get_total_stats()})
 
 
-# ── Announcements ───────────────────────────────────────────────────────
-
-
-@router.get("/admin/announcements")
+@router.get("/admin/announcements", include_in_schema=False)
 async def list_announcements(
     request: Request,
     admin_user: dict = Depends(get_current_admin_user),
 ) -> JSONResponse:
-    """List all announcements. BOFH only."""
+    """
+    List all announcements. BOFH only.
+
+    Parameters:
+        request (Request): The incoming HTTP request.
+        admin_user (dict): The current user.
+
+    Returns:
+        JSONResponse: The list of announcements.
+    """
 
     if not admin_user.get("bofh"):
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
@@ -1137,21 +1303,29 @@ async def list_announcements(
     return JSONResponse(content={"result": announcement_get_all()})
 
 
-@router.post("/admin/announcements")
+@router.post("/admin/announcements", include_in_schema=False)
 async def create_announcement(
     request: Request,
     announcement: CreateAnnouncementRequest,
     admin_user: dict = Depends(get_current_admin_user),
 ) -> JSONResponse:
-    """Create a new announcement. BOFH only."""
+    """
+    Create a new announcement. BOFH only.
+
+    Parameters:
+        request (Request): The incoming HTTP request.
+        announcement (CreateAnnouncementRequest): The announcement data.
+        admin_user (dict): The current user.
+
+    Returns:
+        JSONResponse: The result of the operation.
+    """
 
     if not admin_user.get("bofh"):
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
     if not announcement.message:
-        return JSONResponse(
-            content={"error": "Message is required"}, status_code=400
-        )
+        return JSONResponse(content={"error": "Message is required"}, status_code=400)
 
     created = announcement_create_db(
         message=announcement.message,
@@ -1165,14 +1339,25 @@ async def create_announcement(
     return JSONResponse(content={"result": created})
 
 
-@router.put("/admin/announcements/{announcement_id}")
+@router.put("/admin/announcements/{announcement_id}", include_in_schema=False)
 async def update_announcement(
     request: Request,
     announcement_id: int,
     announcement_update: UpdateAnnouncementRequest,
     admin_user: dict = Depends(get_current_admin_user),
 ) -> JSONResponse:
-    """Update an announcement. BOFH only."""
+    """
+    Update an announcement. BOFH only.
+
+    Parameters:
+        request (Request): The incoming HTTP request.
+        announcement_id (int): The ID of the announcement to update.
+        announcement_update (UpdateAnnouncementRequest): The announcement update data.
+        admin_user (dict): The current user.
+
+    Returns:
+        JSONResponse: The result of the operation.
+    """
 
     if not admin_user.get("bofh"):
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
@@ -1187,23 +1372,37 @@ async def update_announcement(
     )
 
     if not updated:
-        return JSONResponse(content={"error": "Announcement not found"}, status_code=404)
+        return JSONResponse(
+            content={"error": "Announcement not found"}, status_code=404
+        )
 
     return JSONResponse(content={"result": updated})
 
 
-@router.delete("/admin/announcements/{announcement_id}")
+@router.delete("/admin/announcements/{announcement_id}", include_in_schema=False)
 async def delete_announcement(
     request: Request,
     announcement_id: int,
     admin_user: dict = Depends(get_current_admin_user),
 ) -> JSONResponse:
-    """Delete an announcement. BOFH only."""
+    """
+    Delete an announcement. BOFH only.
+
+    Parameters:
+        request (Request): The incoming HTTP request.
+        announcement_id (int): The ID of the announcement to delete.
+        admin_user (dict): The current user.
+
+    Returns:
+        JSONResponse: The result of the operation.
+    """
 
     if not admin_user.get("bofh"):
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
     if not announcement_delete_db(announcement_id):
-        return JSONResponse(content={"error": "Announcement not found"}, status_code=404)
+        return JSONResponse(
+            content={"error": "Announcement not found"}, status_code=404
+        )
 
     return JSONResponse(content={"result": {"status": "OK"}})
