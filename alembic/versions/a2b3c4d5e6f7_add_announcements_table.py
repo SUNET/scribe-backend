@@ -38,17 +38,42 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _ensure_severity_enum(bind: sa.engine.Connection) -> sa.Enum:
+    """Create the severity enum type if it doesn't already exist."""
+    severity_enum = sa.Enum(
+        "info", "maintenance", "major_incident",
+        name="announcementseverityenum",
+    )
+    # Use raw SQL check for Postgres compatibility
+    result = bind.execute(
+        sa.text(
+            "SELECT 1 FROM pg_type WHERE typname = 'announcementseverityenum'"
+        )
+    )
+    if not result.scalar():
+        severity_enum.create(bind)
+    return severity_enum
+
+
 def upgrade() -> None:
     """Upgrade schema."""
 
-    engine = op.get_bind()
-    inspector = inspect(engine)
+    bind = op.get_bind()
+    inspector = inspect(bind)
 
     if "announcements" not in inspector.get_table_names():
+        severity_enum = _ensure_severity_enum(bind)
+
         op.create_table(
             "announcements",
             sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
             sa.Column("message", sa.String(), nullable=False),
+            sa.Column(
+                "severity",
+                severity_enum,
+                nullable=False,
+                server_default="info",
+            ),
             sa.Column("starts_at", sa.DateTime(), nullable=True),
             sa.Column("ends_at", sa.DateTime(), nullable=True),
             sa.Column(
@@ -65,13 +90,30 @@ def upgrade() -> None:
             ),
             sa.Column("created_by", sa.String(), nullable=True),
         )
+    else:
+        columns = [c["name"] for c in inspector.get_columns("announcements")]
+        if "severity" not in columns:
+            severity_enum = _ensure_severity_enum(bind)
+
+            op.add_column(
+                "announcements",
+                sa.Column(
+                    "severity",
+                    severity_enum,
+                    nullable=False,
+                    server_default="info",
+                ),
+            )
 
 
 def downgrade() -> None:
     """Downgrade schema."""
 
-    engine = op.get_bind()
-    inspector = inspect(engine)
+    bind = op.get_bind()
+    inspector = inspect(bind)
 
     if "announcements" in inspector.get_table_names():
         op.drop_table("announcements")
+
+    severity_enum = sa.Enum(name="announcementseverityenum")
+    severity_enum.drop(bind, checkfirst=True)

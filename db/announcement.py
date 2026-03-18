@@ -27,6 +27,7 @@ log = get_logger()
 
 def announcement_create(
     message: str,
+    severity: Optional[str] = "info",
     starts_at: Optional[str] = None,
     ends_at: Optional[str] = None,
     enabled: bool = True,
@@ -37,6 +38,7 @@ def announcement_create(
     with get_session() as session:
         announcement = Announcement(
             message=message,
+            severity=severity or "info",
             starts_at=datetime.fromisoformat(starts_at) if starts_at else None,
             ends_at=datetime.fromisoformat(ends_at) if ends_at else None,
             enabled=enabled,
@@ -72,6 +74,7 @@ def announcement_get_all() -> list[dict]:
 def announcement_update(
     announcement_id: int,
     message: Optional[str] = None,
+    severity: Optional[str] = None,
     starts_at: Optional[str] = None,
     ends_at: Optional[str] = None,
     enabled: Optional[bool] = None,
@@ -85,6 +88,8 @@ def announcement_update(
 
         if message is not None:
             announcement.message = message
+        if severity is not None:
+            announcement.severity = severity
         if starts_at is not None:
             announcement.starts_at = (
                 datetime.fromisoformat(starts_at) if starts_at else None

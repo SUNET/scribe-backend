@@ -1155,6 +1155,7 @@ async def create_announcement(
 
     created = announcement_create_db(
         message=announcement.message,
+        severity=announcement.severity,
         starts_at=announcement.starts_at,
         ends_at=announcement.ends_at,
         enabled=announcement.enabled,
@@ -1179,6 +1180,7 @@ async def update_announcement(
     updated = announcement_update_db(
         announcement_id,
         message=announcement_update.message,
+        severity=announcement_update.severity,
         starts_at=announcement_update.starts_at,
         ends_at=announcement_update.ends_at,
         enabled=announcement_update.enabled,
