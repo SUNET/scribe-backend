@@ -262,6 +262,7 @@ async def update_transcription_status(
     quota_left = user_get_quota_left(user["user_id"])
 
     if not quota_left:
+        logger.warning(f"Quota exceeded for user {user['user_id']}")
         return JSONResponse(
             content={
                 "result": {
@@ -357,7 +358,7 @@ async def put_transcription_result(
                     result=encrypt_string(public_key, item.data),
                 )
     except Exception as e:
-        print(e)
+        logger.error(f"Error saving transcription result for job {job_id}: {e}")
         return JSONResponse(content={"result": {"error": str(e)}}, status_code=500)
 
     return JSONResponse(content={"result": {"status": "OK"}}, status_code=200)

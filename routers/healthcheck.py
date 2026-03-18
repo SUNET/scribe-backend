@@ -24,7 +24,9 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from utils.health import HealthStatus
+from utils.log import get_logger
 
+log = get_logger()
 router = APIRouter(tags=["healthcheck"])
 health = HealthStatus()
 
@@ -68,6 +70,7 @@ async def get_healthcheck(
     """
 
     if not admin_user["bofh"]:
+        log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to healthcheck")
         return JSONResponse(
             content={"error": "User not authorized"},
             status_code=403,

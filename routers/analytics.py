@@ -48,6 +48,7 @@ async def analytics_views(
     """
 
     if not admin_user.get("bofh"):
+        log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to analytics")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
     return JSONResponse(content={"result": get_page_views(days=days)})
@@ -70,6 +71,7 @@ async def analytics_summary(
     """
 
     if not admin_user.get("bofh"):
+        log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to analytics")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
     return JSONResponse(content={"result": get_page_views_summary()})
@@ -94,6 +96,7 @@ async def analytics_daily(
     """
 
     if not admin_user.get("bofh"):
+        log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to analytics")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
     return JSONResponse(content={"result": get_views_per_day(days=days)})
@@ -118,6 +121,7 @@ async def analytics_recent(
     """
 
     if not admin_user.get("bofh"):
+        log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to analytics")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
     return JSONResponse(content={"result": get_recent_views(limit=limit)})
@@ -142,6 +146,7 @@ async def analytics_heatmap(
     """
 
     if not admin_user.get("bofh"):
+        log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to analytics")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
     return JSONResponse(content={"result": get_hourly_heatmap(days=days)})
@@ -166,6 +171,7 @@ async def analytics_hourly(
     """
 
     if not admin_user.get("bofh"):
+        log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to analytics")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
     return JSONResponse(content={"result": get_hourly_distribution(days=days)})
@@ -188,6 +194,7 @@ async def analytics_week_over_week(
     """
 
     if not admin_user.get("bofh"):
+        log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to analytics")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
     return JSONResponse(content={"result": get_week_over_week()})
@@ -210,6 +217,7 @@ async def analytics_stats(
     """
 
     if not admin_user.get("bofh"):
+        log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to analytics")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
     return JSONResponse(content={"result": get_total_stats()})

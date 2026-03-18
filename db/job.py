@@ -245,13 +245,12 @@ def job_update(
     """
 
     with get_session() as session:
-        if not (
-            job := session.query(Job).filter(Job.uuid == uuid).with_for_update().first()
-        ):
-            return None
-
+        query = session.query(Job).filter(Job.uuid == uuid)
         if user_id:
-            job.user_id = user_id
+            query = query.filter(Job.user_id == user_id)
+
+        if not (job := query.with_for_update().first()):
+            return None
         if status:
             job.status = status
         if error:
