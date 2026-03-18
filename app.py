@@ -43,9 +43,13 @@ from db.group import check_group_quota_alerts
 
 from fastapi.openapi.utils import get_openapi
 from routers.admin import router as admin_router
+from routers.analytics import router as analytics_router
+from routers.announcements import router as announcements_router
+from routers.customers import router as customers_router
 from routers.external import router as external_router
 from routers.healthcheck import router as healthcheck_router
 from routers.job import router as job_router
+from routers.rules import router as rules_router
 from routers.transcriber import router as transcriber_router
 from routers.user import router as user_router
 from routers.videostream import router as videostream_router
@@ -160,6 +164,10 @@ app.include_router(videostream_router, prefix=settings.API_PREFIX, tags=["video"
 app.include_router(external_router, prefix=settings.API_PREFIX, tags=["external"])
 app.include_router(healthcheck_router, prefix=settings.API_PREFIX, tags=["healthcheck"])
 app.include_router(admin_router, prefix=settings.API_PREFIX, tags=["admin"])
+app.include_router(analytics_router, prefix=settings.API_PREFIX, tags=["admin"])
+app.include_router(announcements_router, prefix=settings.API_PREFIX, tags=["admin"])
+app.include_router(customers_router, prefix=settings.API_PREFIX, tags=["admin"])
+app.include_router(rules_router, prefix=settings.API_PREFIX, tags=["admin"])
 
 
 def custom_openapi():
