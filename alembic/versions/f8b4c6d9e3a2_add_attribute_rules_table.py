@@ -66,7 +66,7 @@ def upgrade() -> None:
             sa.Column("attribute_name", sa.String(), nullable=False, index=True),
             sa.Column(
                 "attribute_condition",
-                condition_enum,
+                sa.Enum(*CONDITION_VALUES, name="attributeconditionenum", create_type=False),
                 nullable=False,
             ),
             sa.Column("attribute_value", sa.String(), nullable=False),
