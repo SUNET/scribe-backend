@@ -44,7 +44,10 @@ def _ensure_severity_enum(bind: sa.engine.Connection) -> sa.Enum:
         "info", "maintenance", "major_incident",
         name="announcementseverityenum",
     )
-    # Use raw SQL check for Postgres compatibility
+    # SQLite doesn't have native enum types — nothing to create
+    if bind.dialect.name == "sqlite":
+        return severity_enum
+
     result = bind.execute(
         sa.text(
             "SELECT 1 FROM pg_type WHERE typname = 'announcementseverityenum'"
