@@ -230,11 +230,7 @@ def evaluate_rules(decoded_jwt: dict, user: dict) -> dict:
         )
         return {}
 
-    if user.get("manually_activated", False):
-        log.info(
-            f"Skipping rule evaluation for user {user_id}: manually activated."
-        )
-        return {}
+    manually_activated = user.get("manually_activated", False)
 
     actions = {
         "activate": False,
@@ -272,9 +268,13 @@ def evaluate_rules(decoded_jwt: dict, user: dict) -> dict:
                 continue
 
             rule_actions = []
-            if rule.deny:
+            if rule.deny and not manually_activated:
                 actions["deny"] = True
                 rule_actions.append("deny")
+            elif rule.deny and manually_activated:
+                log.info(
+                    f"Ignoring deny rule '{rule.name}' for user {user_id}: manually activated."
+                )
 
             if rule.activate:
                 actions["activate"] = True
