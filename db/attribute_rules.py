@@ -223,10 +223,16 @@ def evaluate_rules(decoded_jwt: dict, user: dict) -> dict:
     username = user.get("username", "")
     user_id = user.get("user_id", "")
 
-    # If the user was manually deactivated, skip all auto-provisioning
+    # If the user was manually deactivated or activated, skip all auto-provisioning
     if user.get("manually_deactivated", False):
         log.info(
             f"Skipping rule evaluation for user {user_id}: manually deactivated."
+        )
+        return {}
+
+    if user.get("manually_activated", False):
+        log.info(
+            f"Skipping rule evaluation for user {user_id}: manually activated."
         )
         return {}
 

@@ -433,6 +433,10 @@ class User(SQLModel, table=True):
         default=False,
         description="Indicates if the user was manually deactivated by an admin",
     )
+    manually_activated: bool = Field(
+        default=False,
+        description="Indicates if the user was manually activated by an admin, preventing rules from deactivating",
+    )
 
     def as_dict(self) -> dict:
         """
