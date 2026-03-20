@@ -73,4 +73,4 @@ def downgrade() -> None:
         op.drop_index(
             op.f("ix_notifications_sent_uuid"), table_name="notifications_sent"
         )
-        op.drop_table("customer")
+        op.drop_table("notifications_sent")
