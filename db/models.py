@@ -455,6 +455,7 @@ class User(SQLModel, table=True):
             "encryption_settings": self.encryption_settings,
             "last_login": str(self.last_login),
             "deleted": self.deleted,
+            "manually_activated": self.manually_activated,
             "manually_deactivated": self.manually_deactivated,
             "notifications": self.notifications,
             "private_key": self.private_key,
