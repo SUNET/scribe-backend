@@ -142,7 +142,9 @@ async def modify_user(
         if not allowed_realms:
             allowed_realms = [admin_user["realm"]]
         if target_user.get("realm") not in allowed_realms:
-            log.warning(f"Admin {admin_user['user_id']} denied modify access to user (realm mismatch)")
+            log.warning(
+                f"Admin {admin_user['user_id']} denied modify access to user (realm mismatch)"
+            )
             return JSONResponse(
                 content={"error": "Not authorized to modify this user"},
                 status_code=403,
@@ -202,7 +204,9 @@ async def delete_user(
         if not allowed_realms:
             allowed_realms = [admin_user["realm"]]
         if target_user.get("realm") not in allowed_realms:
-            log.warning(f"Admin {admin_user['user_id']} denied delete access to user (realm mismatch)")
+            log.warning(
+                f"Admin {admin_user['user_id']} denied delete access to user (realm mismatch)"
+            )
             return JSONResponse(
                 content={"error": "Not authorized to delete this user"},
                 status_code=403,
@@ -305,7 +309,7 @@ async def create_group(
 async def get_group(
     request: Request,
     group_id: str,
-    admin_user: dict = Depends(get_current_user),
+    admin_user: dict = Depends(get_current_admin_user),
 ) -> JSONResponse:
     """
     Get group details.
