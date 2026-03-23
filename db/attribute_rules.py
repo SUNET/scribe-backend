@@ -347,7 +347,15 @@ def apply_rule_actions(actions: dict, user: dict) -> None:
             )
         else:
             try:
-                group_add_user(int(group_id), username)
+                with get_session() as session:
+                    group_exists = session.query(Group).filter(Group.id == int(group_id)).first()
+                if not group_exists:
+                    log.warning(
+                        f"Rule references group {group_id} which no longer exists, "
+                        f"skipping group assignment for user {user_id}."
+                    )
+                else:
+                    group_add_user(int(group_id), username)
             except (ValueError, TypeError):
                 log.warning(
                     f"Could not assign user {user_id} to group {group_id}."
