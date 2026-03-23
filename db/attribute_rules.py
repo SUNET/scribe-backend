@@ -334,11 +334,12 @@ def apply_rule_actions(actions: dict, user: dict) -> None:
     group_id = actions.get("group")
     if group_id:
         with get_session() as session:
+            db_user_for_group = session.query(User).filter(User.user_id == user_id).first()
             existing = (
                 session.query(GroupUserLink)
-                .filter(GroupUserLink.user_id == db_user.id)
+                .filter(GroupUserLink.user_id == db_user_for_group.id)
                 .first()
-            )
+            ) if db_user_for_group else None
         if existing:
             log.info(
                 f"User {user_id} already in group {existing.group_id}, "
