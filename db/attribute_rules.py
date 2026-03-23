@@ -284,9 +284,13 @@ def evaluate_rules(decoded_jwt: dict, user: dict) -> dict:
                 actions["admin"] = True
                 rule_actions.append("grant admin")
 
-            if rule.assign_to_group:
+            if rule.assign_to_group and not manually_activated:
                 actions["group"] = rule.assign_to_group
                 rule_actions.append(f"assign to group {rule.assign_to_group}")
+            elif rule.assign_to_group and manually_activated:
+                log.info(
+                    f"Ignoring group assignment rule '{rule.name}' for user {user_id}: manually activated."
+                )
 
             log.info(
                 f"Rule '{rule.name}' matched for user {user_id}: "
