@@ -35,6 +35,7 @@ class ModifyUserRequest(BaseModel):
     active: Optional[bool] = None
     admin: Optional[bool] = None
     admin_domains: Optional[str] = None
+    reset_manual: Optional[bool] = None
 
 
 class CreateGroupRequest(BaseModel):

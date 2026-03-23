@@ -170,6 +170,12 @@ async def modify_user(
             admin_domains=item.admin_domains,
         )
 
+    if item.reset_manual:
+        user_update(
+            user_id,
+            reset_manual=True,
+        )
+
     return JSONResponse(content={"result": {"status": "OK"}})
 
 

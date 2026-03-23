@@ -404,6 +404,7 @@ def user_update(
     reset_encryption: Optional[bool] = False,
     notifications_str: Optional[str] = None,
     email: Optional[str] = None,
+    reset_manual: Optional[bool] = False,
 ) -> dict:
     """
     Update a user in the database.
@@ -437,6 +438,11 @@ def user_update(
 
         if transcribed_seconds:
             user.transcribed_seconds += float(transcribed_seconds)
+
+        if reset_manual:
+            log.info(f"Resetting manual override flags for user {user.user_id}")
+            user.manually_activated = False
+            user.manually_deactivated = False
 
         if active is not None:
             log.info(f"Setting user {user.user_id} active status to {active}")
