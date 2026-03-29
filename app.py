@@ -31,6 +31,7 @@ from db.analytics import log_page_view
 from db.job import job_cleanup
 from db.attribute_rules import apply_rule_actions, evaluate_rules
 from db.user import (
+    notify_new_user_created,
     user_create,
     user_exists,
     user_get_private_key,
@@ -255,6 +256,9 @@ async def auth(request: Request):
         actions = evaluate_rules(decoded_jwt, user)
         if actions:
             apply_rule_actions(actions, user)
+
+        if not actions.get("activate"):
+            notify_new_user_created(user)
     except Exception as e:
         log.warning(f"Rule evaluation at login failed: {e}")
 

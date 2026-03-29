@@ -102,27 +102,33 @@ def user_create(
 
         session.add(user)
 
-        # Figure out which users we should send a notification
-        # email to about the new user creation.
-        admins = users_admin_domains_from_realm(realm)
+        return user.dict()
 
-        for admin in admins:
-            if not admin["admin"]:
+
+def notify_new_user_created(user: dict) -> None:
+    """Send new-user notification emails to admins for the given user."""
+
+    realm = user.get("realm", "")
+    user_id = user.get("user_id", "")
+    username = user.get("username", "")
+
+    admins = users_admin_domains_from_realm(realm)
+
+    for admin in admins:
+        if not admin["admin"]:
+            continue
+
+        if admin_email := user_get_notifications(admin["user_id"], "user"):
+            if notifications.notification_sent_record_exists(
+                admin["user_id"], user_id, "user_creation"
+            ):
                 continue
 
-            if admin_email := user_get_notifications(admin["user_id"], "user"):
-                if notifications.notification_sent_record_exists(
-                    admin["user_id"], user.user_id, "user_creation"
-                ):
-                    continue
-
-                notifications.send_new_user_created(admin_email, username)
-                notifications.notification_sent_record_add(
-                    admin["user_id"], user.user_id, "user_creation"
-                )
-                log.info(f"Sent new user creation notification to admin {admin_email}")
-
-        return user.dict()
+            notifications.send_new_user_created(admin_email, username)
+            notifications.notification_sent_record_add(
+                admin["user_id"], user_id, "user_creation"
+            )
+            log.info(f"Sent new user creation notification to admin {admin_email}")
 
 
 def user_delete(username: str) -> bool:
