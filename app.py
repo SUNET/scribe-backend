@@ -15,7 +15,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import fcntl
+import os
 import requests
+import tempfile
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -27,7 +30,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from auth.oidc import RefreshToken, oauth, verify_token, verify_user
 from db.analytics import log_page_view
-
+from db.onboarding_attributes import seed_default_attributes
 from db.job import job_cleanup
 from db.attribute_rules import apply_rule_actions, evaluate_rules
 from db.user import (
@@ -60,6 +63,10 @@ from utils.settings import get_settings
 
 settings = get_settings()
 log = get_logger()
+
+scheduler = None
+scheduler_worker = False
+scheduler_lock = None
 
 log.info(f"Starting API: {settings.API_TITLE} {settings.API_VERSION}")
 
@@ -108,52 +115,88 @@ app.add_middleware(
 
 app.add_middleware(SessionMiddleware, settings.API_SECRET_KEY, https_only=False)
 
+
+@app.on_event("startup")
+def acquire_scheduler_lock() -> None:
+    """
+    Try to become the scheduler worker via a file lock (post-fork).
+    """
+
+    global scheduler_worker, scheduler_lock
+
+    lock_path = os.path.join(tempfile.gettempdir(), "transcribe_scheduler.lock")
+
+    try:
+        scheduler_lock = open(lock_path, "w")
+        fcntl.flock(scheduler_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        scheduler_worker = True
+        log.info("This worker acquired the scheduler lock.")
+    except OSError:
+        log.info("Another worker holds the scheduler lock.")
+
+
 # Map (method, route_pattern) to action names for analytics.
 # Only mutating/meaningful endpoints are tracked.
-_prefix = settings.API_PREFIX
 ANALYTICS_ROUTE_MAP = {
-    ("POST", f"{_prefix}/transcriber"): "upload",
-    ("DELETE", f"{_prefix}/transcriber/{{job_id}}"): "delete_job",
-    ("PUT", f"{_prefix}/transcriber/{{job_id}}"): "transcription",
-    ("GET", f"{_prefix}/transcriber/{{job_id}}/result/{{output_format}}"): "export",
-    ("PUT", f"{_prefix}/admin/{{username}}"): "modify_user",
-    ("DELETE", f"{_prefix}/admin/{{username}}"): "remove_user",
-    ("POST", f"{_prefix}/admin/groups"): "create_group",
-    ("PUT", f"{_prefix}/admin/groups/{{group_id}}"): "edit_group",
-    ("DELETE", f"{_prefix}/admin/groups/{{group_id}}"): "delete_group",
+    ("POST", f"{settings.API_PREFIX}/transcriber"): "upload",
+    ("DELETE", f"{settings.API_PREFIX}/transcriber/{{job_id}}"): "delete_job",
+    ("PUT", f"{settings.API_PREFIX}/transcriber/{{job_id}}"): "transcription",
+    (
+        "GET",
+        f"{settings.API_PREFIX}/transcriber/{{job_id}}/result/{{output_format}}",
+    ): "export",
+    ("PUT", f"{settings.API_PREFIX}/admin/{{username}}"): "modify_user",
+    ("DELETE", f"{settings.API_PREFIX}/admin/{{username}}"): "remove_user",
+    ("POST", f"{settings.API_PREFIX}/admin/groups"): "create_group",
+    ("PUT", f"{settings.API_PREFIX}/admin/groups/{{group_id}}"): "edit_group",
+    ("DELETE", f"{settings.API_PREFIX}/admin/groups/{{group_id}}"): "delete_group",
     (
         "POST",
-        f"{_prefix}/admin/groups/{{group_id}}/users/{{username}}",
+        f"{settings.API_PREFIX}/admin/groups/{{group_id}}/users/{{username}}",
     ): "add_group_user",
     (
         "DELETE",
-        f"{_prefix}/admin/groups/{{group_id}}/users/{{username}}",
+        f"{settings.API_PREFIX}/admin/groups/{{group_id}}/users/{{username}}",
     ): "remove_group_user",
-    ("POST", f"{_prefix}/admin/rules"): "create_rule",
-    ("PUT", f"{_prefix}/admin/rules/{{rule_id}}"): "edit_rule",
-    ("DELETE", f"{_prefix}/admin/rules/{{rule_id}}"): "delete_rule",
-    ("POST", f"{_prefix}/admin/attributes"): "create_attribute",
-    ("DELETE", f"{_prefix}/admin/attributes/{{attribute_id}}"): "delete_attribute",
-    ("POST", f"{_prefix}/admin/customers"): "create_customer",
-    ("PUT", f"{_prefix}/admin/customers/{{customer_id}}"): "edit_customer",
-    ("DELETE", f"{_prefix}/admin/customers/{{customer_id}}"): "delete_customer",
-    ("POST", f"{_prefix}/admin/announcements"): "create_announcement",
-    ("PUT", f"{_prefix}/admin/announcements/{{announcement_id}}"): "edit_announcement",
+    ("POST", f"{settings.API_PREFIX}/admin/rules"): "create_rule",
+    ("PUT", f"{settings.API_PREFIX}/admin/rules/{{rule_id}}"): "edit_rule",
+    ("DELETE", f"{settings.API_PREFIX}/admin/rules/{{rule_id}}"): "delete_rule",
+    ("POST", f"{settings.API_PREFIX}/admin/attributes"): "create_attribute",
     (
         "DELETE",
-        f"{_prefix}/admin/announcements/{{announcement_id}}",
+        f"{settings.API_PREFIX}/admin/attributes/{{attribute_id}}",
+    ): "delete_attribute",
+    ("POST", f"{settings.API_PREFIX}/admin/customers"): "create_customer",
+    ("PUT", f"{settings.API_PREFIX}/admin/customers/{{customer_id}}"): "edit_customer",
+    (
+        "DELETE",
+        f"{settings.API_PREFIX}/admin/customers/{{customer_id}}",
+    ): "delete_customer",
+    ("POST", f"{settings.API_PREFIX}/admin/announcements"): "create_announcement",
+    (
+        "PUT",
+        f"{settings.API_PREFIX}/admin/announcements/{{announcement_id}}",
+    ): "edit_announcement",
+    (
+        "DELETE",
+        f"{settings.API_PREFIX}/admin/announcements/{{announcement_id}}",
     ): "delete_announcement",
 }
 
 
 @app.middleware("http")
 async def analytics_middleware(request: Request, call_next):
+    """
+    Middleware to log page views for analytics on mutating/meaningful endpoints.
+    """
+
     response = await call_next(request)
 
     if response.status_code < 200 or response.status_code >= 300:
         return response
 
     route = request.scope.get("route")
+
     if route is None:
         return response
 
@@ -374,6 +417,9 @@ def remove_old_jobs() -> None:
         None
     """
 
+    if not scheduler_worker:
+        return
+
     job_cleanup()
 
 
@@ -412,32 +458,40 @@ def check_quota_alerts_task() -> None:
         None
     """
 
+    if not scheduler_worker:
+        return
+
     check_quota_alerts()
     check_group_quota_alerts()
 
 
-scheduler = BackgroundScheduler()
-scheduler.add_job(
-    send_weekly_usage_reports,
-    CronTrigger(day_of_week="mon", hour=6, minute=0),
-    id="send_weekly_usage_reports",
-    replace_existing=True,
-)
-
-
 @app.on_event("startup")
 def seed_onboarding_attributes_on_startup() -> None:
-    """Seed default onboarding attributes if the table is empty."""
-    from db.onboarding_attributes import seed_default_attributes
+    """
+    Seed default onboarding attributes if the table is empty.
+    """
 
     seed_default_attributes()
 
 
 @app.on_event("startup")
 def start_scheduler() -> None:
+    global scheduler
+
+    if not scheduler_worker:
+        return
+
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(
+        send_weekly_usage_reports,
+        CronTrigger(day_of_week="mon", hour=6, minute=0),
+        id="send_weekly_usage_reports",
+        replace_existing=True,
+    )
     scheduler.start()
 
 
 @app.on_event("shutdown")
 def stop_scheduler() -> None:
-    scheduler.shutdown(wait=False)
+    if scheduler:
+        scheduler.shutdown(wait=False)
