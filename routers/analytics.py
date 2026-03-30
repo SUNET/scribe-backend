@@ -51,7 +51,7 @@ async def analytics_views(
         log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to analytics")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
-    return JSONResponse(content={"result": get_page_views(days=days)})
+    return JSONResponse(content={"result": await get_page_views(days=days)})
 
 
 @router.get("/admin/analytics/summary", include_in_schema=False)
@@ -74,7 +74,7 @@ async def analytics_summary(
         log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to analytics")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
-    return JSONResponse(content={"result": get_page_views_summary()})
+    return JSONResponse(content={"result": await get_page_views_summary()})
 
 
 @router.get("/admin/analytics/daily", include_in_schema=False)
@@ -99,7 +99,7 @@ async def analytics_daily(
         log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to analytics")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
-    return JSONResponse(content={"result": get_views_per_day(days=days)})
+    return JSONResponse(content={"result": await get_views_per_day(days=days)})
 
 
 @router.get("/admin/analytics/recent", include_in_schema=False)
@@ -124,7 +124,7 @@ async def analytics_recent(
         log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to analytics")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
-    return JSONResponse(content={"result": get_recent_views(limit=limit)})
+    return JSONResponse(content={"result": await get_recent_views(limit=limit)})
 
 
 @router.get("/admin/analytics/heatmap", include_in_schema=False)
@@ -149,7 +149,7 @@ async def analytics_heatmap(
         log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to analytics")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
-    return JSONResponse(content={"result": get_hourly_heatmap(days=days)})
+    return JSONResponse(content={"result": await get_hourly_heatmap(days=days)})
 
 
 @router.get("/admin/analytics/hourly", include_in_schema=False)
@@ -174,7 +174,7 @@ async def analytics_hourly(
         log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to analytics")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
-    return JSONResponse(content={"result": get_hourly_distribution(days=days)})
+    return JSONResponse(content={"result": await get_hourly_distribution(days=days)})
 
 
 @router.get("/admin/analytics/wow", include_in_schema=False)
@@ -197,7 +197,7 @@ async def analytics_week_over_week(
         log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to analytics")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
-    return JSONResponse(content={"result": get_week_over_week()})
+    return JSONResponse(content={"result": await get_week_over_week()})
 
 
 @router.get("/admin/analytics/stats", include_in_schema=False)
@@ -220,4 +220,4 @@ async def analytics_stats(
         log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to analytics")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
-    return JSONResponse(content={"result": get_total_stats()})
+    return JSONResponse(content={"result": await get_total_stats()})

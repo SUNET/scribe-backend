@@ -20,8 +20,10 @@ import io
 
 from datetime import datetime, timedelta
 
+from sqlalchemy import or_, select
+
 from db.models import Customer, Job, JobType, User
-from db.session import get_session
+from db.session import get_async_session, get_session
 from typing import Optional
 from utils.log import get_logger
 from utils.notifications import notifications
@@ -31,7 +33,7 @@ settings = get_settings()
 log = get_logger()
 
 
-def customer_create(
+async def customer_create(
     customer_abbr: str,
     partner_id: str,
     name: str,
@@ -62,7 +64,7 @@ def customer_create(
         dict: Dictionary representation of the created customer.
     """
 
-    with get_session() as session:
+    async with get_async_session() as session:
         customer = Customer(
             customer_abbr=customer_abbr,
             partner_id=partner_id,
@@ -77,14 +79,14 @@ def customer_create(
         )
 
         session.add(customer)
-        session.flush()
+        await session.flush()
 
         log.info(f"Customer {customer.name} created with ID {customer.id}.")
 
         return customer.as_dict()
 
 
-def customer_get_from_user_id(user_id: str) -> Optional[dict]:
+async def customer_get_from_user_id(user_id: str) -> Optional[dict]:
     """
     Get a customer by user_id.
 
@@ -95,25 +97,23 @@ def customer_get_from_user_id(user_id: str) -> Optional[dict]:
         Optional[dict]: Dictionary representation of the customer if found, else empty dict.
     """
 
-    with get_session() as session:
-        if not (user := session.query(User).filter(User.user_id == user_id).first()):
+    async with get_async_session() as session:
+        result = await session.execute(select(User).where(User.user_id == user_id))
+        if not (user := result.scalars().first()):
             return {}
 
         realm = user.realm
 
-        if not (
-            customer := (
-                session.query(Customer)
-                .filter(Customer.realms.like(f"%{realm}%"))
-                .first()
-            )
-        ):
+        result = await session.execute(
+            select(Customer).where(Customer.realms.like(f"%{realm}%"))
+        )
+        if not (customer := result.scalars().first()):
             return {}
 
         return customer.as_dict()
 
 
-def customer_get(customer_id: str) -> Optional[dict]:
+async def customer_get(customer_id: str) -> Optional[dict]:
     """
     Get a customer by id.
 
@@ -124,18 +124,17 @@ def customer_get(customer_id: str) -> Optional[dict]:
         Optional[dict]: Dictionary representation of the customer if found, else empty dict.
     """
 
-    with get_session() as session:
-        if not (
-            customer := session.query(Customer)
-            .filter(Customer.id == customer_id)
-            .first()
-        ):
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(Customer).where(Customer.id == customer_id)
+        )
+        if not (customer := result.scalars().first()):
             return {}
 
         return customer.as_dict()
 
 
-def customer_get_by_partner_id(partner_id: str) -> Optional[dict]:
+async def customer_get_by_partner_id(partner_id: str) -> Optional[dict]:
     """
     Get a customer by partner_id.
 
@@ -146,20 +145,17 @@ def customer_get_by_partner_id(partner_id: str) -> Optional[dict]:
         Optional[dict]: Dictionary representation of the customer if found, else empty dict.
     """
 
-    with get_session() as session:
-        if not (
-            customer := (
-                session.query(Customer)
-                .filter(Customer.partner_id == partner_id)
-                .first()
-            )
-        ):
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(Customer).where(Customer.partner_id == partner_id)
+        )
+        if not (customer := result.scalars().first()):
             return {}
 
         return customer.as_dict()
 
 
-def customer_get_all(admin_user: dict) -> list[dict]:
+async def customer_get_all(admin_user: dict) -> list[dict]:
     """
     Get all customers.
 
@@ -170,18 +166,18 @@ def customer_get_all(admin_user: dict) -> list[dict]:
         list[dict]: List of dictionary representations of customers.
     """
 
-    with get_session() as session:
+    async with get_async_session() as session:
         if admin_user["bofh"]:
-            customers = session.query(Customer).all()
+            result = await session.execute(select(Customer))
+            customers = result.scalars().all()
             return [customer.as_dict() for customer in customers]
         elif admin_user["admin"]:
             realm = admin_user["realm"]
             # Pre-filter with SQL LIKE, then verify exact match
-            candidates = (
-                session.query(Customer)
-                .filter(Customer.realms.like(f"%{realm}%"))
-                .all()
+            result = await session.execute(
+                select(Customer).where(Customer.realms.like(f"%{realm}%"))
             )
+            candidates = result.scalars().all()
             matching_customers = []
 
             for customer in candidates:
@@ -198,7 +194,7 @@ def customer_get_all(admin_user: dict) -> list[dict]:
             return []
 
 
-def customer_update(
+async def customer_update(
     customer_id: Optional[str] = None,
     customer_abbr: Optional[str] = None,
     partner_id: Optional[str] = None,
@@ -231,13 +227,11 @@ def customer_update(
         Optional[dict]: Dictionary representation of the updated customer if found, else empty dict.
     """
 
-    with get_session() as session:
-        if not (
-            customer := session.query(Customer)
-            .filter(Customer.id == customer_id)
-            .with_for_update()
-            .first()
-        ):
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(Customer).where(Customer.id == customer_id).with_for_update()
+        )
+        if not (customer := result.scalars().first()):
             return {}
 
         if customer_abbr is not None:
@@ -266,7 +260,7 @@ def customer_update(
         return customer.as_dict()
 
 
-def customer_delete(customer_id: int) -> bool:
+async def customer_delete(customer_id: int) -> bool:
     """
     Delete a customer by id.
 
@@ -276,12 +270,11 @@ def customer_delete(customer_id: int) -> bool:
     Returns:
         bool: True if the customer was deleted, False if not found.
     """
-    with get_session() as session:
-        if not (
-            customer := session.query(Customer)
-            .filter(Customer.id == customer_id)
-            .first()
-        ):
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(Customer).where(Customer.id == customer_id)
+        )
+        if not (customer := result.scalars().first()):
             return False
 
         session.delete(customer)
@@ -291,7 +284,7 @@ def customer_delete(customer_id: int) -> bool:
     return True
 
 
-def customer_get_statistics(customer_id: str) -> dict:
+async def customer_get_statistics(customer_id: str) -> dict:
     """
     Get statistics for a specific customer.
     Calculates transcription statistics for all users in the customer's realms.
@@ -304,12 +297,11 @@ def customer_get_statistics(customer_id: str) -> dict:
         dict: Dictionary containing customer statistics.
     """
 
-    with get_session() as session:
-        if not (
-            customer := session.query(Customer)
-            .filter(Customer.id == customer_id)
-            .first()
-        ):
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(Customer).where(Customer.id == customer_id)
+        )
+        if not (customer := result.scalars().first()):
             return {
                 "total_users": 0,
                 "transcribed_files": 0,
@@ -358,11 +350,15 @@ def customer_get_statistics(customer_id: str) -> dict:
                 * settings.CUSTOMER_MINUTES_PER_BLOCK,
             }
 
-        users = session.query(User).filter(User.realm.in_(realm_list)).all()
-
-        partner_users = (
-            session.query(User).filter(User.username == customer.partner_id).all()
+        result = await session.execute(
+            select(User).where(User.realm.in_(realm_list))
         )
+        users = list(result.scalars().all())
+
+        result = await session.execute(
+            select(User).where(User.username == customer.partner_id)
+        )
+        partner_users = result.scalars().all()
 
         users.extend(partner_users)
 
@@ -383,15 +379,17 @@ def customer_get_statistics(customer_id: str) -> dict:
 
         # Batch-fetch all jobs for all users in one query instead of N+1
         user_ids = [user.user_id for user in users]
-        all_jobs = (
-            session.query(Job)
-            .filter(
-                Job.user_id.in_(user_ids),
-                Job.job_type == JobType.TRANSCRIPTION,
-                Job.created_at >= first_day_prev_month,
+        if user_ids:
+            result = await session.execute(
+                select(Job).where(
+                    Job.user_id.in_(user_ids),
+                    Job.job_type == JobType.TRANSCRIPTION,
+                    Job.created_at >= first_day_prev_month,
+                )
             )
-            .all()
-        ) if user_ids else []
+            all_jobs = result.scalars().all()
+        else:
+            all_jobs = []
 
         # Build user_id -> User mapping for username checks
         user_map = {user.user_id: user for user in users}
@@ -472,7 +470,7 @@ def customer_get_statistics(customer_id: str) -> dict:
         }
 
 
-def get_all_realms() -> list[str]:
+async def get_all_realms() -> list[str]:
     """
     Get all unique realms from users.
     Returns a sorted list of unique realm strings.
@@ -483,23 +481,23 @@ def get_all_realms() -> list[str]:
     Returns:
         list[str]: Sorted list of unique realms.
     """
-    with get_session() as session:
-        realms = session.query(User.realm).distinct().all()
+    async with get_async_session() as session:
+        result = await session.execute(select(User.realm).distinct())
+        realms = result.all()
         realm_list = [realm[0] for realm in realms if realm[0]]
 
         return sorted(realm_list)
 
 
-def _customers_matching_realm(session, realm: str) -> list:
+async def _customers_matching_realm(session, realm: str) -> list:
     """Return customers whose realms field contains the given realm."""
-    return (
-        session.query(Customer)
-        .filter(Customer.realms.like(f"%{realm}%"))
-        .all()
+    result = await session.execute(
+        select(Customer).where(Customer.realms.like(f"%{realm}%"))
     )
+    return result.scalars().all()
 
 
-def get_customer_name_from_realm(realm: str) -> Optional[str]:
+async def get_customer_name_from_realm(realm: str) -> Optional[str]:
     """
     Get customer name from a realm.
     Returns the customer name if the realm is associated with a customer.
@@ -510,8 +508,8 @@ def get_customer_name_from_realm(realm: str) -> Optional[str]:
     Returns:
         Optional[str]: Customer name if found, else None.
     """
-    with get_session() as session:
-        for customer in _customers_matching_realm(session, realm):
+    async with get_async_session() as session:
+        for customer in await _customers_matching_realm(session, realm):
             customer_realms = [
                 r.strip() for r in customer.realms.split(",") if r.strip()
             ]
@@ -521,7 +519,7 @@ def get_customer_name_from_realm(realm: str) -> Optional[str]:
         return None
 
 
-def get_customer_by_realm(realm: str) -> Optional[dict]:
+async def get_customer_by_realm(realm: str) -> Optional[dict]:
     """
     Get customer details by realm.
     Returns the first customer that has this realm in their realms list.
@@ -532,8 +530,8 @@ def get_customer_by_realm(realm: str) -> Optional[dict]:
     Returns:
         Optional[dict]: Customer dictionary if found, else None.
     """
-    with get_session() as session:
-        for customer in _customers_matching_realm(session, realm):
+    async with get_async_session() as session:
+        for customer in await _customers_matching_realm(session, realm):
             customer_realms = [
                 r.strip() for r in customer.realms.split(",") if r.strip()
             ]
@@ -543,7 +541,7 @@ def get_customer_by_realm(realm: str) -> Optional[dict]:
         return None
 
 
-def customer_list_by_realms(realms: list[str]) -> list[dict]:
+async def customer_list_by_realms(realms: list[str]) -> list[dict]:
     """
     Get all customers that have any of the specified realms.
 
@@ -553,12 +551,16 @@ def customer_list_by_realms(realms: list[str]) -> list[dict]:
     Returns:
         List of customer dictionaries
     """
-    from sqlalchemy import or_
-
-    with get_session() as session:
+    async with get_async_session() as session:
         # Pre-filter with SQL LIKE to reduce rows fetched
         conditions = [Customer.realms.like(f"%{realm}%") for realm in realms]
-        customers = session.query(Customer).filter(or_(*conditions)).all() if conditions else []
+        if conditions:
+            result = await session.execute(
+                select(Customer).where(or_(*conditions))
+            )
+            customers = result.scalars().all()
+        else:
+            customers = []
 
         matching_customers = []
         for customer in customers:
@@ -571,7 +573,7 @@ def customer_list_by_realms(realms: list[str]) -> list[dict]:
         return matching_customers
 
 
-def export_customers_to_csv(admin_user: dict) -> str:
+async def export_customers_to_csv(admin_user: dict) -> str:
     """
     Export all customers with their statistics to CSV format.
 
@@ -584,7 +586,7 @@ def export_customers_to_csv(admin_user: dict) -> str:
 
     output = io.StringIO()
 
-    if not (customers := customer_get_all(admin_user)):
+    if not (customers := await customer_get_all(admin_user)):
         return ""
 
     now = datetime.now()
@@ -623,7 +625,7 @@ def export_customers_to_csv(admin_user: dict) -> str:
     writer.writeheader()
 
     for customer in customers:
-        stats = customer_get_statistics(customer["id"])
+        stats = await customer_get_statistics(customer["id"])
 
         row = {
             "Customer Name": customer.get("name", ""),
@@ -669,6 +671,156 @@ def export_customers_to_csv(admin_user: dict) -> str:
     return output.getvalue()
 
 
+def _customer_get_statistics_sync(customer_id: str) -> dict:
+    """Sync version of customer_get_statistics for APScheduler background tasks."""
+
+    with get_session() as session:
+        customer = (
+            session.query(Customer)
+            .filter(Customer.id == customer_id)
+            .first()
+        )
+
+        if not customer:
+            return {
+                "total_users": 0,
+                "transcribed_files": 0,
+                "transcribed_files_last_month": 0,
+                "transcribed_minutes": 0,
+                "transcribed_minutes_external": 0,
+                "transcribed_minutes_last_month": 0,
+                "transcribed_minutes_external_last_month": 0,
+                "total_transcribed_minutes": 0,
+                "total_transcribed_minutes_last_month": 0,
+                "blocks_purchased": 0,
+                "blocks_consumed": 0,
+                "minutes_included": 0,
+                "overage_minutes": 0,
+                "overage_minutes_last_month": 0,
+                "remaining_minutes": 0,
+            }
+
+        if not (
+            realm_list := [r.strip() for r in customer.realms.split(",") if r.strip()]
+        ):
+            blocks = customer.blocks_purchased if customer.blocks_purchased else 0
+            mins = blocks * settings.CUSTOMER_MINUTES_PER_BLOCK
+            return {
+                "total_users": 0,
+                "transcribed_files": 0,
+                "transcribed_minutes": 0,
+                "transcribed_minutes_external": 0,
+                "transcribed_minutes_last_month": 0,
+                "transcribed_minutes_external_last_month": 0,
+                "transcribed_files_last_month": 0,
+                "total_transcribed_minutes": 0,
+                "total_transcribed_minutes_last_month": 0,
+                "blocks_purchased": blocks,
+                "blocks_consumed": 0,
+                "minutes_included": mins,
+                "overage_minutes": 0,
+                "overage_minutes_last_month": 0,
+                "remaining_minutes": mins,
+            }
+
+        users = session.query(User).filter(User.realm.in_(realm_list)).all()
+        partner_users = (
+            session.query(User).filter(User.username == customer.partner_id).all()
+        )
+        users.extend(partner_users)
+
+        transcribed_minutes = 0
+        transcribed_minutes_external = 0
+        transcribed_minutes_last_month = 0
+        transcribed_minutes_external_last_month = 0
+
+        total_transcribed_minutes_current = 0
+        total_transcribed_minutes_last = 0
+        total_files_current = 0
+        total_files_last = 0
+
+        today = datetime.utcnow().date()
+        first_day_this_month = today.replace(day=1)
+        last_day_prev_month = first_day_this_month - timedelta(days=1)
+        first_day_prev_month = last_day_prev_month.replace(day=1)
+
+        user_ids = [user.user_id for user in users]
+        all_jobs = (
+            session.query(Job)
+            .filter(
+                Job.user_id.in_(user_ids),
+                Job.job_type == JobType.TRANSCRIPTION,
+                Job.created_at >= first_day_prev_month,
+            )
+            .all()
+        ) if user_ids else []
+
+        user_map = {user.user_id: user for user in users}
+
+        for job in all_jobs:
+            job_date = job.created_at.date()
+            user = user_map.get(job.user_id)
+            is_external = user.username.isnumeric() if user else False
+
+            if job.status in ("completed", "deleted"):
+                transcribed_seconds = job.transcribed_seconds or 0
+
+                if job_date >= first_day_this_month:
+                    total_files_current += 1
+                    total_transcribed_minutes_current += transcribed_seconds / 60
+                    if is_external:
+                        transcribed_minutes_external += transcribed_seconds / 60
+                    else:
+                        transcribed_minutes += transcribed_seconds / 60
+                elif first_day_prev_month <= job_date <= last_day_prev_month:
+                    total_files_last += 1
+                    total_transcribed_minutes_last += transcribed_seconds / 60
+                    if is_external:
+                        transcribed_minutes_external_last_month += transcribed_seconds / 60
+                    else:
+                        transcribed_minutes_last_month += transcribed_seconds / 60
+
+        blocks_purchased = customer.blocks_purchased if customer.blocks_purchased else 0
+        minutes_included = blocks_purchased * settings.CUSTOMER_MINUTES_PER_BLOCK
+        blocks_consumed = 0
+        overage_minutes = 0
+        overage_minutes_last_month = 0
+        remaining_minutes = 0
+
+        if customer.priceplan == "fixed" and blocks_purchased > 0:
+            if total_transcribed_minutes_current > minutes_included:
+                blocks_consumed = blocks_purchased
+                overage_minutes = total_transcribed_minutes_current - minutes_included
+                remaining_minutes = 0
+            else:
+                blocks_consumed = (
+                    total_transcribed_minutes_current / settings.CUSTOMER_MINUTES_PER_BLOCK
+                )
+                remaining_minutes = minutes_included - total_transcribed_minutes_current
+            if transcribed_minutes_last_month > 4000 * blocks_purchased:
+                overage_minutes_last_month = total_transcribed_minutes_last - (
+                    4000 * blocks_purchased
+                )
+
+        return {
+            "total_users": len(users),
+            "transcribed_files": int(total_files_current),
+            "transcribed_files_last_month": int(total_files_last),
+            "transcribed_minutes": int(transcribed_minutes),
+            "transcribed_minutes_external": int(transcribed_minutes_external),
+            "transcribed_minutes_last_month": int(transcribed_minutes_last_month),
+            "transcribed_minutes_external_last_month": int(transcribed_minutes_external_last_month),
+            "total_transcribed_minutes": int(total_transcribed_minutes_current),
+            "total_transcribed_minutes_last_month": int(total_transcribed_minutes_last),
+            "blocks_purchased": blocks_purchased,
+            "blocks_consumed": round(blocks_consumed, 2),
+            "minutes_included": minutes_included,
+            "overage_minutes": int(overage_minutes),
+            "overage_minutes_last_month": int(overage_minutes_last_month),
+            "remaining_minutes": int(remaining_minutes),
+        }
+
+
 def check_quota_alerts() -> None:
     """
     Check all fixed-plan customers for 95%+ block quota consumption.
@@ -689,7 +841,7 @@ def check_quota_alerts() -> None:
         )
 
         for customer in customers:
-            stats = customer_get_statistics(customer.id)
+            stats = _customer_get_statistics_sync(customer.id)
             minutes_included = stats.get("minutes_included", 0)
 
             if minutes_included == 0:
@@ -817,7 +969,7 @@ def send_weekly_usage_reports() -> None:
                 cust = customer_map.get(cid)
                 if cust:
                     customer_names.append(cust.name)
-                stats = customer_get_statistics(cid)
+                stats = _customer_get_statistics_sync(cid)
                 for key in totals:
                     totals[key] += stats.get(key, 0)
 

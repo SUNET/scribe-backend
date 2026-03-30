@@ -58,7 +58,7 @@ async def list_announcements(
         log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to announcements")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
-    return JSONResponse(content={"result": announcement_get_all()})
+    return JSONResponse(content={"result": await announcement_get_all()})
 
 
 @router.post("/admin/announcements", include_in_schema=False)
@@ -86,7 +86,7 @@ async def create_announcement(
     if not announcement.message:
         return JSONResponse(content={"error": "Message is required"}, status_code=400)
 
-    created = announcement_create_db(
+    created = await announcement_create_db(
         message=announcement.message,
         severity=announcement.severity,
         starts_at=announcement.starts_at,
@@ -122,7 +122,7 @@ async def update_announcement(
         log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to announcements")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
-    updated = announcement_update_db(
+    updated = await announcement_update_db(
         announcement_id,
         message=announcement_update.message,
         severity=announcement_update.severity,
@@ -161,7 +161,7 @@ async def delete_announcement(
         log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to announcements")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
-    if not announcement_delete_db(announcement_id):
+    if not await announcement_delete_db(announcement_id):
         return JSONResponse(
             content={"error": "Announcement not found"}, status_code=404
         )

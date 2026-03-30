@@ -19,7 +19,7 @@ import time
 
 from auth.client import verify_client_dn
 from auth.oidc import get_current_admin_user
-from db.session import get_session
+from db.session import get_async_session
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
@@ -100,8 +100,8 @@ async def get_status() -> JSONResponse:
 
     # Check database connectivity
     try:
-        with get_session() as session:
-            session.execute(text("SELECT 1"))
+        async with get_async_session() as session:
+            await session.execute(text("SELECT 1"))
     except Exception:
         status["database"] = "error"
 

@@ -58,12 +58,12 @@ async def list_customers(
         JSONResponse: The list of customers with statistics.
     """
 
-    customers = customer_get_all(admin_user)
+    customers = await customer_get_all(admin_user)
 
     result = []
 
     for customer in customers:
-        stats = customer_get_statistics(customer["id"])
+        stats = await customer_get_statistics(customer["id"])
         customer["stats"] = stats
         result.append(customer)
 
@@ -96,7 +96,7 @@ async def create_customer(
             content={"error": "Missing required fields"}, status_code=400
         )
 
-    customer = customer_create(
+    customer = await customer_create(
         customer_abbr=item.customer_abbr,
         partner_id=item.partner_id,
         name=item.name,
@@ -130,7 +130,7 @@ async def get_customer(
         JSONResponse: The customer details.
     """
 
-    if not (customer := customer_get(customer_id)):
+    if not (customer := await customer_get(customer_id)):
         return JSONResponse(content={"error": "Customer not found"}, status_code=404)
 
     return JSONResponse(content={"result": customer})
@@ -159,7 +159,7 @@ async def update_customer(
         log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to update customer {customer_id}")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
-    customer = customer_update(
+    customer = await customer_update(
         customer_id,
         customer_abbr=item.customer_abbr,
         partner_id=item.partner_id,
@@ -201,7 +201,7 @@ async def delete_customer(
         log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to delete customer {customer_id}")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
-    if not customer_delete(customer_id):
+    if not await customer_delete(customer_id):
         return JSONResponse(content={"error": "Customer not found"}, status_code=404)
 
     return JSONResponse(content={"result": {"status": "OK"}})
@@ -227,7 +227,7 @@ async def list_realms(
         log.warning(f"Non-BOFH user {admin_user['user_id']} denied access to list realms")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
-    return JSONResponse(content={"result": get_all_realms()})
+    return JSONResponse(content={"result": await get_all_realms()})
 
 
 @router.get("/admin/customers/{customer_id}/stats", include_in_schema=False)
@@ -252,10 +252,10 @@ async def customer_stats(
         log.warning(f"User {admin_user['user_id']} denied access to customer stats {customer_id}")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
-    if not customer_get(customer_id):
+    if not await customer_get(customer_id):
         return JSONResponse(content={"error": "Customer not found"}, status_code=404)
 
-    return JSONResponse(content={"result": customer_get_statistics(customer_id)})
+    return JSONResponse(content={"result": await customer_get_statistics(customer_id)})
 
 
 @router.get("/admin/customers/export/csv")
@@ -278,7 +278,7 @@ async def export_customers_csv(
         log.warning(f"User {admin_user['user_id']} denied access to export customers CSV")
         return JSONResponse(content={"error": "User not authorized"}, status_code=403)
 
-    if not (csv_data := export_customers_to_csv(admin_user).encode("utf-8")):
+    if not (csv_data := (await export_customers_to_csv(admin_user)).encode("utf-8")):
         return JSONResponse(
             content={"error": "No customer data to export"}, status_code=404
         )

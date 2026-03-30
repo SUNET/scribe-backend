@@ -55,10 +55,10 @@ async def get_video_stream(
         StreamingResponse: The video stream response.
     """
 
-    job = job_get(job_id, user["user_id"])
+    job = await job_get(job_id, user["user_id"])
 
     if item.encryption_password != "" and item.encryption_password is not None:
-        private_key = user_get_private_key(user["user_id"])
+        private_key = await user_get_private_key(user["user_id"])
         private_key = deserialize_private_key_from_pem(
             private_key, item.encryption_password
         )

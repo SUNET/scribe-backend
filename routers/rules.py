@@ -110,7 +110,7 @@ async def list_rules(
     else:
         realm = _get_admin_allowed_realms(admin_user)
 
-    return JSONResponse(content={"result": rule_get_all(realm=realm)})
+    return JSONResponse(content={"result": await rule_get_all(realm=realm)})
 
 
 @router.post("/admin/rules")
@@ -134,7 +134,7 @@ async def create_rule(
         allowed = _get_admin_allowed_realms(admin_user)
         realm = item.realm if item.realm in allowed else allowed[0]
 
-    rule = rule_create(
+    rule = await rule_create(
         name=item.name,
         attribute_name=item.attribute_name,
         attribute_condition=item.attribute_condition,
@@ -162,7 +162,7 @@ async def get_rule(
     Get a single attribute rule.
     """
 
-    rule = rule_get(rule_id)
+    rule = await rule_get(rule_id)
 
     if not rule:
         return JSONResponse(content={"error": "Rule not found"}, status_code=404)
@@ -200,7 +200,7 @@ async def update_rule_endpoint(
     """
 
     if not admin_user["bofh"]:
-        if not (existing := rule_get(rule_id)):
+        if not (existing := await rule_get(rule_id)):
             return JSONResponse(content={"error": "Rule not found"}, status_code=404)
 
         allowed = _get_admin_allowed_realms(admin_user)
@@ -216,7 +216,7 @@ async def update_rule_endpoint(
             if not new_realms.issubset(set(allowed)):
                 item.realm = existing["realm"]
 
-    rule = rule_update(
+    rule = await rule_update(
         rule_id,
         name=item.name,
         attribute_name=item.attribute_name,
@@ -257,7 +257,7 @@ async def delete_rule_endpoint(
     """
 
     if not admin_user["bofh"]:
-        if not (existing := rule_get(rule_id)):
+        if not (existing := await rule_get(rule_id)):
             return JSONResponse(content={"error": "Rule not found"}, status_code=404)
 
         allowed = _get_admin_allowed_realms(admin_user)
@@ -266,7 +266,7 @@ async def delete_rule_endpoint(
             log.warning(f"Admin {admin_user['user_id']} denied delete access to rule {rule_id} (realm mismatch)")
             return JSONResponse(content={"error": "Not authorized"}, status_code=403)
 
-    if not rule_delete(rule_id, user_id=admin_user["user_id"]):
+    if not await rule_delete(rule_id, user_id=admin_user["user_id"]):
         return JSONResponse(content={"error": "Rule not found"}, status_code=404)
 
     return JSONResponse(content={"result": {"status": "OK"}})
@@ -299,7 +299,7 @@ async def test_rules_endpoint(
         allowed = _get_admin_allowed_realms(admin_user)
         realm = allowed
 
-    matches = test_rules(item.rule_ids, realm=realm)
+    matches = await test_rules(item.rule_ids, realm=realm)
 
     return JSONResponse(content={"result": matches})
 
@@ -320,7 +320,7 @@ async def list_attributes(
         JSONResponse: The list of onboarding attributes.
     """
 
-    return JSONResponse(content={"result": attribute_get_all()})
+    return JSONResponse(content={"result": await attribute_get_all()})
 
 
 @router.post("/admin/attributes", include_in_schema=False)
@@ -352,7 +352,7 @@ async def create_attribute(
         )
 
     if not (
-        attr := attribute_add(
+        attr := await attribute_add(
             name=item.name, description=item.description, example=item.example
         )
     ):
@@ -387,7 +387,7 @@ async def delete_attribute(
             content={"error": "Only BOFH can manage attributes"}, status_code=403
         )
 
-    if not attribute_delete(attribute_id):
+    if not await attribute_delete(attribute_id):
         return JSONResponse(content={"error": "Attribute not found"}, status_code=404)
 
     return JSONResponse(content={"result": {"status": "OK"}})

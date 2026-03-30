@@ -18,7 +18,6 @@
 from authlib.integrations.starlette_client import OAuth
 from authlib.jose import jwt
 from datetime import datetime
-from db.session import get_session
 from db.user import user_create
 from fastapi import HTTPException
 from fastapi import Request
@@ -29,7 +28,6 @@ from utils.settings import get_settings
 
 log = get_logger()
 settings = get_settings()
-db_session = get_session()
 
 oauth = OAuth()
 oauth.register(
@@ -190,7 +188,7 @@ async def verify_user(request: Request, admin: Optional[bool] = False) -> str:
     username = decoded_jwt.get("preferred_username")
     realm = decoded_jwt.get("realm", username.split("@")[-1])
 
-    user = user_create(
+    user = await user_create(
         username=username,
         realm=realm,
         user_id=user_id,

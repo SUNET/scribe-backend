@@ -70,7 +70,7 @@ async def get_job_external(
         JSONResponse: The job status.
     """
 
-    res = job_get_by_external_id(external_id, client_dn)
+    res = await job_get_by_external_id(external_id, client_dn)
 
     if not isinstance(res, dict) and res and res["status"] == "completed":
         logger.error(f"External job not found: {external_id}")
@@ -80,7 +80,7 @@ async def get_job_external(
             },
         )
 
-    if not (job_result := job_result_get_external(external_id)):
+    if not (job_result := await job_result_get_external(external_id)):
         logger.error(f"External job result not found: {external_id}")
         return JSONResponse(
             content={
@@ -90,8 +90,8 @@ async def get_job_external(
 
     try:
         # Decrypt the result text
-        user = user_get(username="api_user")
-        private_key = user_get_private_key(user["user_id"])
+        user = await user_get(username="api_user")
+        private_key = await user_get_private_key(user["user_id"])
         deserialized_private_key = deserialize_private_key_from_pem(
             private_key, settings.API_PRIVATE_KEY_PASSWORD
         )
@@ -129,7 +129,7 @@ async def delete_external_transcription_job(
     Returns:
         JSONResponse: The result of the deletion.
     """
-    job = job_get_by_external_id(external_id, client_dn)
+    job = await job_get_by_external_id(external_id, client_dn)
 
     if not job:
         return JSONResponse(
@@ -137,7 +137,7 @@ async def delete_external_transcription_job(
         )
 
     # Delete the job from the database
-    status = job_remove(job["uuid"])
+    status = await job_remove(job["uuid"])
 
     if status is False:
         logger.debug(f"JOB REMOVE FALSE: {job}")
@@ -186,9 +186,9 @@ async def transcribe_external_file(
                 )
             )
 
-        user_create(username=item.user_id, user_id=item.user_id, realm="external")
+        await user_create(username=item.user_id, user_id=item.user_id, realm="external")
 
-        job = job_create(
+        job = await job_create(
             user_id=item.user_id,
             job_type=JobType.TRANSCRIPTION,
             filename=filename,
@@ -206,12 +206,12 @@ async def transcribe_external_file(
         if not file_path.exists():
             file_path.mkdir(parents=True, exist_ok=True)
 
-        if not (api_user := user_get(username="api_user")):
+        if not (api_user := await user_get(username="api_user")):
             return JSONResponse(
                 content={"result": {"error": "API user not found"}}, status_code=500
             )
 
-        public_key = user_get_public_key(api_user["user_id"])
+        public_key = await user_get_public_key(api_user["user_id"])
         public_key = deserialize_public_key_from_pem(public_key)
 
         encrypt_data_to_file(
@@ -224,12 +224,12 @@ async def transcribe_external_file(
     except Exception as e:
         logger.error("Caught exception while creating external job - {}".format(e))
         if job is not None:
-            job = job_update(
+            job = await job_update(
                 job["uuid"], item.user_id, status=JobStatusEnum.FAILED, error=str(e)
             )
         return JSONResponse(content={"result": {"error": str(e)}}, status_code=500)
 
-    job = job_update(job["uuid"], status=JobStatusEnum.PENDING)
+    job = await job_update(job["uuid"], status=JobStatusEnum.PENDING)
 
     return JSONResponse(
         content={

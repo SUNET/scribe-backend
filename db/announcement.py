@@ -18,14 +18,16 @@
 from datetime import datetime
 from typing import Optional
 
+from sqlalchemy import select
+
 from db.models import Announcement
-from db.session import get_session
+from db.session import get_async_session
 from utils.log import get_logger
 
 log = get_logger()
 
 
-def announcement_create(
+async def announcement_create(
     message: str,
     severity: Optional[str] = "info",
     starts_at: Optional[str] = None,
@@ -35,7 +37,7 @@ def announcement_create(
 ) -> dict | None:
     """Create a new announcement."""
 
-    with get_session() as session:
+    async with get_async_session() as session:
         announcement = Announcement(
             message=message,
             severity=severity or "info",
@@ -45,33 +47,32 @@ def announcement_create(
             created_by=created_by,
         )
         session.add(announcement)
-        session.flush()
+        await session.flush()
         return announcement.as_dict()
 
 
-def announcement_get(announcement_id: int) -> dict | None:
+async def announcement_get(announcement_id: int) -> dict | None:
     """Get a single announcement by ID."""
 
-    with get_session() as session:
-        announcement = session.get(Announcement, announcement_id)
+    async with get_async_session() as session:
+        announcement = await session.get(Announcement, announcement_id)
         if not announcement:
             return None
         return announcement.as_dict()
 
 
-def announcement_get_all() -> list[dict]:
+async def announcement_get_all() -> list[dict]:
     """Get all announcements ordered by creation date descending."""
 
-    with get_session() as session:
-        announcements = (
-            session.query(Announcement)
-            .order_by(Announcement.created_at.desc())
-            .all()
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(Announcement).order_by(Announcement.created_at.desc())
         )
+        announcements = result.scalars().all()
         return [a.as_dict() for a in announcements]
 
 
-def announcement_update(
+async def announcement_update(
     announcement_id: int,
     message: Optional[str] = None,
     severity: Optional[str] = None,
@@ -81,8 +82,8 @@ def announcement_update(
 ) -> dict | None:
     """Update an existing announcement."""
 
-    with get_session() as session:
-        announcement = session.get(Announcement, announcement_id)
+    async with get_async_session() as session:
+        announcement = await session.get(Announcement, announcement_id)
         if not announcement:
             return None
 
@@ -101,30 +102,32 @@ def announcement_update(
         if enabled is not None:
             announcement.enabled = enabled
 
-        session.flush()
+        await session.flush()
         return announcement.as_dict()
 
 
-def announcement_delete(announcement_id: int) -> bool:
+async def announcement_delete(announcement_id: int) -> bool:
     """Delete an announcement."""
 
-    with get_session() as session:
-        announcement = session.get(Announcement, announcement_id)
+    async with get_async_session() as session:
+        announcement = await session.get(Announcement, announcement_id)
         if not announcement:
             return False
         session.delete(announcement)
         return True
 
 
-def announcement_get_active() -> list[dict]:
+async def announcement_get_active() -> list[dict]:
     """Get all currently active announcements (enabled + within date window)."""
 
     now = datetime.now()
 
-    with get_session() as session:
-        query = session.query(Announcement).filter(Announcement.enabled.is_(True))
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(Announcement).where(Announcement.enabled.is_(True))
+        )
 
-        announcements = query.all()
+        announcements = result.scalars().all()
         active = []
         for a in announcements:
             if a.starts_at and a.starts_at > now:

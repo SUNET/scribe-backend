@@ -1,40 +1,41 @@
 from datetime import datetime, timedelta
 
-from sqlalchemy import case, func
+from sqlalchemy import case, func, select
 from db.models import PageView
-from db.session import get_session
+from db.session import get_async_session
 
 
-def log_page_view(path: str) -> None:
+async def log_page_view(path: str) -> None:
     """Insert an anonymous page view record."""
-    with get_session() as session:
+    async with get_async_session() as session:
         session.add(PageView(path=path))
 
 
-def get_page_views(days: int = 30) -> list[dict]:
+async def get_page_views(days: int = 30) -> list[dict]:
     """Page views grouped by path + day for the last N days."""
     cutoff = datetime.utcnow() - timedelta(days=days)
-    with get_session() as session:
-        rows = (
-            session.query(
+    async with get_async_session() as session:
+        stmt = (
+            select(
                 PageView.path,
                 func.date(PageView.timestamp).label("date"),
                 func.count().label("views"),
             )
-            .filter(PageView.timestamp >= cutoff)
+            .where(PageView.timestamp >= cutoff)
             .group_by(PageView.path, func.date(PageView.timestamp))
             .order_by(func.date(PageView.timestamp))
-            .all()
         )
+        result = await session.execute(stmt)
+        rows = result.all()
         return [{"path": r.path, "date": str(r.date), "views": r.views} for r in rows]
 
 
-def get_page_views_summary() -> list[dict]:
+async def get_page_views_summary() -> list[dict]:
     """Total views per page: all time and last 30 days."""
     cutoff = datetime.utcnow() - timedelta(days=30)
-    with get_session() as session:
-        rows = (
-            session.query(
+    async with get_async_session() as session:
+        stmt = (
+            select(
                 PageView.path,
                 func.count().label("total_views"),
                 func.sum(
@@ -43,103 +44,109 @@ def get_page_views_summary() -> list[dict]:
             )
             .group_by(PageView.path)
             .order_by(func.count().desc())
-            .all()
         )
+        result = await session.execute(stmt)
+        rows = result.all()
         return [
             {"path": r.path, "total_views": r.total_views, "views_30d": int(r.views_30d or 0)}
             for r in rows
         ]
 
 
-def get_views_per_day(days: int = 30) -> list[dict]:
+async def get_views_per_day(days: int = 30) -> list[dict]:
     """Total views per day for the last N days."""
     cutoff = datetime.utcnow() - timedelta(days=days)
-    with get_session() as session:
-        rows = (
-            session.query(
+    async with get_async_session() as session:
+        stmt = (
+            select(
                 func.date(PageView.timestamp).label("date"),
                 func.count().label("views"),
             )
-            .filter(PageView.timestamp >= cutoff)
+            .where(PageView.timestamp >= cutoff)
             .group_by(func.date(PageView.timestamp))
             .order_by(func.date(PageView.timestamp))
-            .all()
         )
+        result = await session.execute(stmt)
+        rows = result.all()
         return [{"date": str(r.date), "views": r.views} for r in rows]
 
 
-def get_recent_views(limit: int = 50) -> list[dict]:
+async def get_recent_views(limit: int = 50) -> list[dict]:
     """Most recent page views."""
-    with get_session() as session:
-        rows = (
-            session.query(PageView.path, PageView.timestamp)
+    async with get_async_session() as session:
+        stmt = (
+            select(PageView.path, PageView.timestamp)
             .order_by(PageView.timestamp.desc())
             .limit(limit)
-            .all()
         )
+        result = await session.execute(stmt)
+        rows = result.all()
         return [{"path": r.path, "timestamp": str(r.timestamp)} for r in rows]
 
 
-def get_hourly_heatmap(days: int = 30) -> list[dict]:
+async def get_hourly_heatmap(days: int = 30) -> list[dict]:
     """Views grouped by day-of-week and hour-of-day for a heatmap."""
     cutoff = datetime.utcnow() - timedelta(days=days)
-    with get_session() as session:
-        rows = (
-            session.query(
+    async with get_async_session() as session:
+        stmt = (
+            select(
                 func.extract("dow", PageView.timestamp).label("dow"),
                 func.extract("hour", PageView.timestamp).label("hour"),
                 func.count().label("views"),
             )
-            .filter(PageView.timestamp >= cutoff)
+            .where(PageView.timestamp >= cutoff)
             .group_by("dow", "hour")
-            .all()
         )
+        result = await session.execute(stmt)
+        rows = result.all()
         return [
             {"dow": int(r.dow), "hour": int(r.hour), "views": r.views}
             for r in rows
         ]
 
 
-def get_hourly_distribution(days: int = 30) -> list[dict]:
+async def get_hourly_distribution(days: int = 30) -> list[dict]:
     """Total views per hour-of-day."""
     cutoff = datetime.utcnow() - timedelta(days=days)
-    with get_session() as session:
-        rows = (
-            session.query(
+    async with get_async_session() as session:
+        stmt = (
+            select(
                 func.extract("hour", PageView.timestamp).label("hour"),
                 func.count().label("views"),
             )
-            .filter(PageView.timestamp >= cutoff)
+            .where(PageView.timestamp >= cutoff)
             .group_by("hour")
             .order_by("hour")
-            .all()
         )
+        result = await session.execute(stmt)
+        rows = result.all()
         return [{"hour": int(r.hour), "views": r.views} for r in rows]
 
 
-def get_week_over_week() -> dict:
+async def get_week_over_week() -> dict:
     """Compare this week's views vs last week's."""
     now = datetime.utcnow()
     this_week_start = now - timedelta(days=now.weekday())
     this_week_start = this_week_start.replace(hour=0, minute=0, second=0, microsecond=0)
     last_week_start = this_week_start - timedelta(days=7)
 
-    with get_session() as session:
+    async with get_async_session() as session:
         this_week = (
-            session.query(func.count(PageView.id))
-            .filter(PageView.timestamp >= this_week_start)
-            .scalar()
-            or 0
-        )
-        last_week = (
-            session.query(func.count(PageView.id))
-            .filter(
-                PageView.timestamp >= last_week_start,
-                PageView.timestamp < this_week_start,
+            await session.execute(
+                select(func.count(PageView.id))
+                .where(PageView.timestamp >= this_week_start)
             )
-            .scalar()
-            or 0
-        )
+        ).scalar() or 0
+
+        last_week = (
+            await session.execute(
+                select(func.count(PageView.id))
+                .where(
+                    PageView.timestamp >= last_week_start,
+                    PageView.timestamp < this_week_start,
+                )
+            )
+        ).scalar() or 0
 
         if last_week > 0:
             change_pct = round(((this_week - last_week) / last_week) * 100, 1)
@@ -153,25 +160,30 @@ def get_week_over_week() -> dict:
         }
 
 
-def get_total_stats() -> dict:
+async def get_total_stats() -> dict:
     """Aggregate stats for summary cards."""
     cutoff = datetime.utcnow() - timedelta(days=30)
-    with get_session() as session:
-        total_views = session.query(func.count(PageView.id)).scalar() or 0
+    async with get_async_session() as session:
+        total_views = (
+            await session.execute(select(func.count(PageView.id)))
+        ).scalar() or 0
+
         views_30d = (
-            session.query(func.count(PageView.id))
-            .filter(PageView.timestamp >= cutoff)
-            .scalar()
-            or 0
-        )
+            await session.execute(
+                select(func.count(PageView.id))
+                .where(PageView.timestamp >= cutoff)
+            )
+        ).scalar() or 0
 
         top_page_row = (
-            session.query(PageView.path, func.count().label("cnt"))
-            .filter(PageView.timestamp >= cutoff)
-            .group_by(PageView.path)
-            .order_by(func.count().desc())
-            .first()
-        )
+            await session.execute(
+                select(PageView.path, func.count().label("cnt"))
+                .where(PageView.timestamp >= cutoff)
+                .group_by(PageView.path)
+                .order_by(func.count().desc())
+                .limit(1)
+            )
+        ).first()
 
         return {
             "total_views": total_views,

@@ -79,7 +79,7 @@ async def statistics(
         realms = [d.strip() for d in admin_domains.split(",") if d.strip()]
         realm = realms if realms else [admin_user["realm"]]
 
-    return JSONResponse(content={"result": users_statistics(realm=realm)})
+    return JSONResponse(content={"result": await users_statistics(realm=realm)})
 
 
 @router.get("/admin/users")
@@ -107,7 +107,7 @@ async def list_users(
         if not realms:
             realms = [admin_user["realm"]]
 
-    return JSONResponse(content={"result": user_get_all(realm=realms)})
+    return JSONResponse(content={"result": await user_get_all(realm=realms)})
 
 
 @router.put("/admin/{username}")
@@ -129,7 +129,7 @@ async def modify_user(
     Returns:
         JSONResponse: The result of the operation.
     """
-    target_user = user_get(username=username)
+    target_user = await user_get(username=username)
     if not target_user or not target_user.get("user_id"):
         return JSONResponse(
             content={"error": "User not found"},
@@ -153,25 +153,25 @@ async def modify_user(
     user_id = target_user["user_id"]
 
     if item.active is not None:
-        user_update(
+        await user_update(
             user_id,
             active=item.active,
         )
 
     if item.admin is not None:
-        user_update(
+        await user_update(
             user_id,
             admin=item.admin,
         )
 
     if item.admin_domains is not None:
-        user_update(
+        await user_update(
             user_id,
             admin_domains=item.admin_domains,
         )
 
     if item.reset_manual:
-        user_update(
+        await user_update(
             user_id,
             reset_manual=True,
         )
@@ -199,7 +199,7 @@ async def delete_user(
     """
 
     if not admin_user["bofh"]:
-        target_user = user_get(username=username)
+        target_user = await user_get(username=username)
         if not target_user or not target_user.get("user_id"):
             return JSONResponse(
                 content={"error": "User not found"},
@@ -218,7 +218,7 @@ async def delete_user(
                 status_code=403,
             )
 
-    if not user_delete(username):
+    if not await user_delete(username):
         return JSONResponse(
             content={"error": "User not found"},
             status_code=404,
@@ -248,11 +248,11 @@ async def list_groups(
     else:
         realm = admin_user["realm"]
 
-    groups = group_get_all(admin_user["user_id"], realm=realm)
+    groups = await group_get_all(admin_user["user_id"], realm=realm)
     result = []
 
     for g in groups:
-        stats = group_statistics(str(g["id"]), admin_user["user_id"], realm)
+        stats = await group_statistics(str(g["id"]), admin_user["user_id"], realm)
 
         if g["name"] == "All users":
             g["nr_users"] = stats["total_users"]
@@ -295,7 +295,7 @@ async def create_group(
     if not item.name:
         return JSONResponse(content={"error": "Missing group name"}, status_code=400)
 
-    group = group_create(
+    group = await group_create(
         name=item.name,
         realm=admin_user["realm"],
         description=item.description,
@@ -334,7 +334,7 @@ async def get_group(
     else:
         realm = admin_user["realm"]
 
-    group = group_get(group_id, realm=realm, user_id=admin_user["user_id"])
+    group = await group_get(group_id, realm=realm, user_id=admin_user["user_id"])
 
     if not group:
         return JSONResponse(content={"error": "Group not found"}, status_code=404)
@@ -362,7 +362,7 @@ async def update_group(
     """
 
     try:
-        if not group_update(
+        if not await group_update(
             group_id,
             name=item.name,
             description=item.description,
@@ -394,7 +394,7 @@ async def delete_group(
         JSONResponse: The result of the operation.
     """
 
-    if not group_delete(group_id):
+    if not await group_delete(group_id):
         return JSONResponse(content={"error": "Group not found"}, status_code=404)
 
     return JSONResponse(content={"result": {"status": "OK"}})
@@ -420,7 +420,7 @@ async def add_user_to_group(
         JSONResponse: The result of the operation.
     """
 
-    if not group_add_user(group_id, username):
+    if not await group_add_user(group_id, username):
         return JSONResponse(
             content={"error": "User or group not found"}, status_code=404
         )
@@ -448,7 +448,7 @@ async def remove_user_from_group(
         JSONResponse: The result of the operation.
     """
 
-    if not group_remove_user(group_id, username):
+    if not await group_remove_user(group_id, username):
         return JSONResponse(
             content={"error": "User or group not found"}, status_code=404
         )
@@ -479,14 +479,14 @@ async def group_stats(
     else:
         realm = admin_user["realm"]
 
-    group = group_get(group_id, realm=realm, user_id=admin_user["user_id"])
+    group = await group_get(group_id, realm=realm, user_id=admin_user["user_id"])
 
     if not group:
         return JSONResponse(content={"error": "Group not found"}, status_code=404)
 
     return JSONResponse(
         content={
-            "result": users_statistics(
+            "result": await users_statistics(
                 group_id, realm=realm, user_id=admin_user["user_id"]
             )
         }

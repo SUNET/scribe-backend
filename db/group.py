@@ -17,8 +17,9 @@
 
 from db.customer import customer_get_from_user_id
 from db.models import Group, GroupModelLink, GroupUserLink, User
-from db.session import get_session
-from sqlalchemy import func, or_
+from db.session import get_async_session, get_session
+from sqlalchemy import func, or_, select
+from sqlalchemy.orm import selectinload
 from typing import Optional
 
 from utils.log import get_logger
@@ -27,7 +28,12 @@ from utils.notifications import notifications
 log = get_logger()
 
 
-def group_create(
+# Helper to add eager loading options for Group relationships
+def _group_eager_options():
+    return [selectinload(Group.users), selectinload(Group.allowed_models)]
+
+
+async def group_create(
     name: str,
     realm: str,
     description: Optional[str] = None,
@@ -48,7 +54,7 @@ def group_create(
         dict: The created group as a dictionary.
     """
 
-    with get_session() as session:
+    async with get_async_session() as session:
         group = Group(
             name=name,
             realm=realm,
@@ -58,14 +64,17 @@ def group_create(
         )
 
         session.add(group)
-        session.flush()
+        await session.flush()
+
+        # Refresh with eager loading for as_dict()
+        await session.refresh(group, attribute_names=["users", "allowed_models"])
 
         log.info(f"Group {group.id} created with name {name}.")
 
         return group.as_dict()
 
 
-def group_get(group_id: str, realm: str, user_id: Optional[str] = "") -> Optional[dict]:
+async def group_get(group_id: str, realm: str, user_id: Optional[str] = "") -> Optional[dict]:
     """
     Get a group by id with its users and models.
 
@@ -78,27 +87,32 @@ def group_get(group_id: str, realm: str, user_id: Optional[str] = "") -> Optiona
         Optional[dict]: The group as a dictionary, or None if not found.
     """
 
-    with get_session() as session:
+    async with get_async_session() as session:
         if group_id == "0":
             # Default group with all users
             group = Group(name="All users", realm=realm)
         else:
             if realm == "*":
                 # Admin requesting from all realms
-                group = session.query(Group).filter(Group.id == group_id).first()
+                result = await session.execute(
+                    select(Group)
+                    .where(Group.id == group_id)
+                    .options(*_group_eager_options())
+                )
+                group = result.scalars().first()
             else:
                 # Check if user has access to the group
                 admin_domains = (
-                    session.query(User.admin_domains)
-                    .filter(User.user_id == user_id)
-                    .scalar()
-                )
+                    await session.execute(
+                        select(User.admin_domains).where(User.user_id == user_id)
+                    )
+                ).scalar()
 
                 # If no admin domains, only allow if user is in group or is owner
-                group = (
-                    session.query(Group)
-                    .filter(Group.id == group_id)
-                    .filter(
+                result = await session.execute(
+                    select(Group)
+                    .where(Group.id == group_id)
+                    .where(
                         or_(
                             Group.users.any(User.user_id == user_id),
                             Group.owner_user_id == user_id,
@@ -109,42 +123,44 @@ def group_get(group_id: str, realm: str, user_id: Optional[str] = "") -> Optiona
                             ),
                         )
                     )
-                    .first()
+                    .options(*_group_eager_options())
                 )
+                group = result.scalars().first()
 
         if not group:
             return {}
 
         if realm == "*":
             # Admin requesting from all realms
-            other_users = (
-                session.query(User)
-                .filter(~User.groups.any(Group.id == group_id), User.deleted == False)  # noqa: E712
-                .all()
+            result = await session.execute(
+                select(User)
+                .where(~User.groups.any(Group.id == group_id), User.deleted == False)  # noqa: E712
             )
+            other_users = result.scalars().all()
         else:
             # Check admin domains for additional users
             admin_domains = (
-                session.query(User.admin_domains)
-                .filter(User.user_id == user_id)
-                .scalar()
-            )
+                await session.execute(
+                    select(User.admin_domains).where(User.user_id == user_id)
+                )
+            ).scalar()
 
             if not admin_domains:
                 return group.as_dict()
 
             # Get users not in the group but in the admin domains
-            other_users = (
-                session.query(User)
-                .filter(
+            result = await session.execute(
+                select(User)
+                .where(
                     ~User.groups.any(Group.id == group_id),
                     User.deleted == False,  # noqa: E712
                     User.realm.in_(
                         [domain.strip() for domain in admin_domains.split(",")]
                     ),
                 )
-                .all()
             )
+            other_users = result.scalars().all()
+
         group_dict = group.as_dict()
 
         for user in group_dict["users"]:
@@ -159,7 +175,7 @@ def group_get(group_id: str, realm: str, user_id: Optional[str] = "") -> Optiona
         return group_dict
 
 
-def group_get_from_user_id(user_id: str) -> list[dict]:
+async def group_get_from_user_id(user_id: str) -> list[dict]:
     """
     Get all groups for a specific user id.
 
@@ -170,15 +186,16 @@ def group_get_from_user_id(user_id: str) -> list[dict]:
         list[dict]: A list of groups the user belongs to.
     """
 
-    with get_session() as session:
-        groups = (
-            session.query(Group).filter(Group.users.any(User.user_id == user_id)).all()
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(Group).where(Group.users.any(User.user_id == user_id))
         )
+        groups = result.scalars().all()
 
     return groups
 
 
-def group_get_all(user_id: str, realm: str) -> list[dict]:
+async def group_get_all(user_id: str, realm: str) -> list[dict]:
     """
     Get all groups with their users and models.
 
@@ -209,37 +226,47 @@ def group_get_all(user_id: str, realm: str) -> list[dict]:
 
         groups_list.append(default_group)
 
-    with get_session() as session:
+    async with get_async_session() as session:
         admin_domains = (
-            session.query(User.admin_domains).filter(User.user_id == user_id).scalar()
-        )
+            await session.execute(
+                select(User.admin_domains).where(User.user_id == user_id)
+            )
+        ).scalar()
 
         if realm == "*":
-            groups = session.query(Group).all()
+            result = await session.execute(
+                select(Group).options(*_group_eager_options())
+            )
+            groups = result.scalars().all()
         elif admin_domains:
             domains = [
                 domain.strip() for domain in admin_domains.split(",") if domain.strip()
             ]
 
-            groups = session.query(Group).filter(Group.realm.in_(domains)).all()
+            result = await session.execute(
+                select(Group)
+                .where(Group.realm.in_(domains))
+                .options(*_group_eager_options())
+            )
+            groups = result.scalars().all()
         else:
-            groups = (
-                session.query(Group)
-                .filter(
+            result = await session.execute(
+                select(Group)
+                .where(
                     or_(
                         Group.users.any(User.user_id == user_id),
                         Group.owner_user_id == user_id,
                     )
                 )
-                .all()
+                .options(*_group_eager_options())
             )
+            groups = result.scalars().all()
 
         for group in groups:
             group_dict = group.as_dict()
             group_dict["nr_users"] = len(group_dict["users"])
-            group_dict["customer_name"] = customer_get_from_user_id(
-                group_dict["owner_user_id"]
-            ).get("name", "None")
+            cust = await customer_get_from_user_id(group_dict["owner_user_id"])
+            group_dict["customer_name"] = cust.get("name", "None") if cust else "None"
 
             groups_list.append(group_dict)
             all_users.extend(group_dict["users"])
@@ -263,7 +290,7 @@ def group_get_all(user_id: str, realm: str) -> list[dict]:
     return groups_list
 
 
-def group_get_quota_left(group_id: int) -> int:
+async def group_get_quota_left(group_id: int) -> int:
     """
     Get the remaining quota seconds for a group.
 
@@ -274,23 +301,28 @@ def group_get_quota_left(group_id: int) -> int:
         int: The remaining quota seconds for the group.
     """
 
-    with get_session() as session:
-        if not (group := session.query(Group).filter(Group.id == group_id).first()):
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(Group).where(Group.id == group_id)
+        )
+        group = result.scalars().first()
+        if not group:
             return 0
 
         quota_seconds = group.quota_seconds
 
         used_seconds = (
-            session.query(func.coalesce(func.sum(User.transcribed_seconds), 0))
-            .join(GroupUserLink, GroupUserLink.user_id == User.id)
-            .filter(GroupUserLink.group_id == group_id)
-            .scalar()
-        )
+            await session.execute(
+                select(func.coalesce(func.sum(User.transcribed_seconds), 0))
+                .join(GroupUserLink, GroupUserLink.user_id == User.id)
+                .where(GroupUserLink.group_id == group_id)
+            )
+        ).scalar()
 
         return max(quota_seconds - used_seconds, 0)
 
 
-def group_delete(group_id: int) -> bool:
+async def group_delete(group_id: int) -> bool:
     """
     Delete a group by id.
 
@@ -300,26 +332,34 @@ def group_delete(group_id: int) -> bool:
     Returns:
         bool: True if the group was deleted, False otherwise.
     """
-    with get_session() as session:
-        if not (group := session.query(Group).filter(Group.id == group_id).first()):
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(Group).where(Group.id == group_id)
+        )
+        group = result.scalars().first()
+        if not group:
             return False
 
         # Bulk delete all links to users and models
-        session.query(GroupUserLink).filter(
-            GroupUserLink.group_id == group_id
-        ).delete()
-        session.query(GroupModelLink).filter(
-            GroupModelLink.group_id == group_id
-        ).delete()
+        await session.execute(
+            select(GroupUserLink).where(GroupUserLink.group_id == group_id)
+        )
+        from sqlalchemy import delete
+        await session.execute(
+            delete(GroupUserLink).where(GroupUserLink.group_id == group_id)
+        )
+        await session.execute(
+            delete(GroupModelLink).where(GroupModelLink.group_id == group_id)
+        )
 
-        session.delete(group)
+        await session.delete(group)
 
         log.info(f"Group {group_id} deleted.")
 
         return True
 
 
-def group_update(
+async def group_update(
     group_id: str,
     name: Optional[str] = None,
     description: Optional[str] = None,
@@ -340,13 +380,15 @@ def group_update(
         Optional[dict]: The updated group as a dictionary, or None if not found.
     """
 
-    with get_session() as session:
-        if not (
-            group := session.query(Group)
-            .filter(Group.id == group_id)
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(Group)
+            .where(Group.id == group_id)
             .with_for_update()
-            .first()
-        ):
+            .options(*_group_eager_options())
+        )
+        group = result.scalars().first()
+        if not group:
             return {}
 
         if name is not None:
@@ -357,25 +399,26 @@ def group_update(
             group.quota_seconds = quota_seconds
         if usernames is not None:
             # Batch-fetch all users by username in one query
-            users_map = {
-                u.username: u
-                for u in session.query(User)
-                .filter(User.username.in_(usernames), User.deleted == False)  # noqa: E712
-                .all()
-            }
+            users_result = await session.execute(
+                select(User).where(
+                    User.username.in_(usernames), User.deleted == False  # noqa: E712
+                )
+            )
+            users_list = users_result.scalars().all()
+            users_map = {u.username: u for u in users_list}
 
             # Batch-check for users already in other groups
             user_db_ids = [u.id for u in users_map.values()]
             if user_db_ids:
-                existing_links = (
-                    session.query(GroupUserLink, Group.name)
+                existing_result = await session.execute(
+                    select(GroupUserLink, Group.name)
                     .join(Group, Group.id == GroupUserLink.group_id)
-                    .filter(
+                    .where(
                         GroupUserLink.group_id != group.id,
                         GroupUserLink.user_id.in_(user_db_ids),
                     )
-                    .all()
                 )
+                existing_links = existing_result.all()
 
                 # Build reverse map: user db id -> username
                 id_to_username = {u.id: u.username for u in users_map.values()}
@@ -387,9 +430,10 @@ def group_update(
                     )
 
             # Bulk delete existing links
-            session.query(GroupUserLink).filter(
-                GroupUserLink.group_id == group.id
-            ).delete()
+            from sqlalchemy import delete
+            await session.execute(
+                delete(GroupUserLink).where(GroupUserLink.group_id == group.id)
+            )
 
             for username in usernames:
                 user = users_map.get(username)
@@ -405,7 +449,7 @@ def group_update(
         return group.as_dict()
 
 
-def group_add_user(group_id: int, username: str, role: str = "member") -> dict:
+async def group_add_user(group_id: int, username: str, role: str = "member") -> dict:
     """
     Add a user to a group with a given role.
 
@@ -417,24 +461,24 @@ def group_add_user(group_id: int, username: str, role: str = "member") -> dict:
     Returns:
         dict: The group-user link as a dictionary.
     """
-    with get_session() as session:
-        user = (
-            session.query(User)
-            .filter(User.username == username, User.deleted == False)  # noqa: E712
-            .first()
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(User).where(
+                User.username == username, User.deleted == False  # noqa: E712
+            )
         )
+        user = result.scalars().first()
         if not user:
             return {}
 
         user_id = user.id
 
-        link = (
-            session.query(GroupUserLink)
-            .filter(
+        result = await session.execute(
+            select(GroupUserLink).where(
                 GroupUserLink.group_id == group_id, GroupUserLink.user_id == user_id
             )
-            .first()
         )
+        link = result.scalars().first()
         if not link:
             link = GroupUserLink(group_id=group_id, user_id=user_id, role=role)
             session.add(link)
@@ -444,7 +488,7 @@ def group_add_user(group_id: int, username: str, role: str = "member") -> dict:
         return {"group_id": group_id, "user_id": user_id, "role": role}
 
 
-def group_remove_user(group_id: int, user_id: int) -> bool:
+async def group_remove_user(group_id: int, user_id: int) -> bool:
     """
     Remove a user from a group.
 
@@ -455,26 +499,25 @@ def group_remove_user(group_id: int, user_id: int) -> bool:
     Returns:
         bool: True if the user was removed, False otherwise.
     """
-    with get_session() as session:
-        link = (
-            session.query(GroupUserLink)
-            .filter(
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(GroupUserLink).where(
                 GroupUserLink.group_id == group_id, GroupUserLink.user_id == user_id
             )
-            .first()
         )
+        link = result.scalars().first()
 
         if not link:
             return False
 
-        session.delete(link)
+        await session.delete(link)
 
         log.info(f"User {user_id} removed from group {group_id}.")
 
         return True
 
 
-def group_add_model(group_id: int, model_id: int) -> dict:
+async def group_add_model(group_id: int, model_id: int) -> dict:
     """
     Link a model to a group.
 
@@ -485,14 +528,13 @@ def group_add_model(group_id: int, model_id: int) -> dict:
     Returns:
         dict: The group-model link as a dictionary.
     """
-    with get_session() as session:
-        link = (
-            session.query(GroupModelLink)
-            .filter(
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(GroupModelLink).where(
                 GroupModelLink.group_id == group_id, GroupModelLink.model_id == model_id
             )
-            .first()
         )
+        link = result.scalars().first()
 
         if not link:
             link = GroupModelLink(group_id=group_id, model_id=model_id)
@@ -501,7 +543,7 @@ def group_add_model(group_id: int, model_id: int) -> dict:
         return {"group_id": group_id, "model_id": model_id}
 
 
-def group_remove_model(group_id: int, model_id: int) -> bool:
+async def group_remove_model(group_id: int, model_id: int) -> bool:
     """
     Unlink a model from a group.
 
@@ -512,35 +554,37 @@ def group_remove_model(group_id: int, model_id: int) -> bool:
     Returns:
         bool: True if the model was unlinked, False otherwise.
     """
-    with get_session() as session:
-        link = (
-            session.query(GroupModelLink)
-            .filter(
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(GroupModelLink).where(
                 GroupModelLink.group_id == group_id, GroupModelLink.model_id == model_id
             )
-            .first()
         )
+        link = result.scalars().first()
 
         if not link:
             return False
 
-        session.delete(link)
+        await session.delete(link)
 
         return True
 
 
-def group_list() -> list[dict]:
+async def group_list() -> list[dict]:
     """
     List all groups with their metadata.
 
     Returns:
         list[dict]: A list of groups as dictionaries.
     """
-    with get_session() as session:
-        return [g.as_dict() for g in session.query(Group).all()]
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(Group).options(*_group_eager_options())
+        )
+        return [g.as_dict() for g in result.scalars().all()]
 
 
-def group_get_users(group_id: str, realm: str) -> list[dict]:
+async def group_get_users(group_id: str, realm: str) -> list[dict]:
     """
     Get all users in a group.
 
@@ -551,15 +595,14 @@ def group_get_users(group_id: str, realm: str) -> list[dict]:
     Returns:
         list[dict]: A list of users in the group as dictionaries.
     """
-    with get_session() as session:
-        if not (
-            group := (
-                session.query(Group)
-                .filter(Group.id == group_id)
-                .filter(Group.realm == realm)
-                .first()
-            )
-        ):
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(Group)
+            .where(Group.id == group_id, Group.realm == realm)
+            .options(*_group_eager_options())
+        )
+        group = result.scalars().first()
+        if not group:
             return []
 
         return [user.as_dict() for user in group.users]

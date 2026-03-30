@@ -19,15 +19,17 @@ import re
 
 from typing import Optional
 
+from sqlalchemy import select
+
 from db.group import group_add_user
 from db.models import AttributeConditionEnum, AttributeRule, Group, GroupUserLink, User
-from db.session import get_session
+from db.session import get_async_session
 from utils.log import get_logger
 
 log = get_logger()
 
 
-def rule_create(
+async def rule_create(
     name: str,
     attribute_name: str,
     attribute_condition: str,
@@ -43,7 +45,7 @@ def rule_create(
 ) -> dict:
     """Create a new attribute rule."""
 
-    with get_session() as session:
+    async with get_async_session() as session:
         rule = AttributeRule(
             name=name,
             attribute_name=attribute_name,
@@ -58,28 +60,34 @@ def rule_create(
             enabled=enabled,
         )
         session.add(rule)
-        session.flush()
+        await session.flush()
         log.info(f"Attribute rule {rule.id} created by user {user_id}.")
         return rule.as_dict()
 
 
-def rule_get(rule_id: int) -> Optional[dict]:
+async def rule_get(rule_id: int) -> Optional[dict]:
     """Get a single attribute rule by ID."""
 
-    with get_session() as session:
-        rule = session.query(AttributeRule).filter(AttributeRule.id == rule_id).first()
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(AttributeRule).where(AttributeRule.id == rule_id)
+        )
+        rule = result.scalars().first()
         return rule.as_dict() if rule else None
 
 
-def rule_get_all(realm: Optional[str | list[str]] = None) -> list[dict]:
+async def rule_get_all(realm: Optional[str | list[str]] = None) -> list[dict]:
     """Get all attribute rules, optionally filtered by realm(s).
 
     For comma-separated realm values in rules, checks if any of the
     rule's realms overlap with the requested realm(s).
     """
 
-    with get_session() as session:
-        rules = session.query(AttributeRule).order_by(AttributeRule.id).all()
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(AttributeRule).order_by(AttributeRule.id)
+        )
+        rules = result.scalars().all()
         all_rules = [r.as_dict() for r in rules]
 
     if not realm or realm == "*":
@@ -97,7 +105,7 @@ def rule_get_all(realm: Optional[str | list[str]] = None) -> list[dict]:
     return result
 
 
-def rule_update(
+async def rule_update(
     rule_id: int,
     name: Optional[str] = None,
     attribute_name: Optional[str] = None,
@@ -114,13 +122,13 @@ def rule_update(
 ) -> Optional[dict]:
     """Update an existing attribute rule."""
 
-    with get_session() as session:
-        rule = (
-            session.query(AttributeRule)
-            .filter(AttributeRule.id == rule_id)
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(AttributeRule)
+            .where(AttributeRule.id == rule_id)
             .with_for_update()
-            .first()
         )
+        rule = result.scalars().first()
         if not rule:
             return None
 
@@ -151,14 +159,17 @@ def rule_update(
         return rule.as_dict()
 
 
-def rule_delete(rule_id: int, user_id: Optional[str] = None) -> bool:
+async def rule_delete(rule_id: int, user_id: Optional[str] = None) -> bool:
     """Delete an attribute rule by ID."""
 
-    with get_session() as session:
-        rule = session.query(AttributeRule).filter(AttributeRule.id == rule_id).first()
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(AttributeRule).where(AttributeRule.id == rule_id)
+        )
+        rule = result.scalars().first()
         if not rule:
             return False
-        session.delete(rule)
+        await session.delete(rule)
         log.info(f"Attribute rule {rule_id} deleted by user {user_id}.")
         return True
 
@@ -206,7 +217,7 @@ def _get_claim_values(decoded_jwt: dict, attribute_name: str) -> list[str]:
     return [str(value)]
 
 
-def evaluate_rules(decoded_jwt: dict, user: dict) -> dict:
+async def evaluate_rules(decoded_jwt: dict, user: dict) -> dict:
     """
     Evaluate all enabled attribute rules against a decoded JWT token.
     Returns a dict of actions to apply to the user.
@@ -239,13 +250,13 @@ def evaluate_rules(decoded_jwt: dict, user: dict) -> dict:
         "group": None,
     }
 
-    with get_session() as session:
-        rules = (
-            session.query(AttributeRule)
-            .filter(AttributeRule.enabled == True)  # noqa: E712
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(AttributeRule)
+            .where(AttributeRule.enabled == True)  # noqa: E712
             .order_by(AttributeRule.id)
-            .all()
         )
+        rules = result.scalars().all()
 
         for rule in rules:
             # Check realm scope
@@ -301,7 +312,7 @@ def evaluate_rules(decoded_jwt: dict, user: dict) -> dict:
     return actions
 
 
-def apply_rule_actions(actions: dict, user: dict) -> None:
+async def apply_rule_actions(actions: dict, user: dict) -> None:
     """
     Apply the evaluated rule actions to a user.
 
@@ -316,8 +327,11 @@ def apply_rule_actions(actions: dict, user: dict) -> None:
     user_id = user.get("user_id", "")
     username = user.get("username", "")
 
-    with get_session() as session:
-        db_user = session.query(User).filter(User.user_id == user_id).first()
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(User).where(User.user_id == user_id)
+        )
+        db_user = result.scalars().first()
         if not db_user:
             return
 
@@ -337,13 +351,21 @@ def apply_rule_actions(actions: dict, user: dict) -> None:
     # Group assignment — only if the user is not already in any group
     group_id = actions.get("group")
     if group_id:
-        with get_session() as session:
-            db_user_for_group = session.query(User).filter(User.user_id == user_id).first()
-            existing = (
-                session.query(GroupUserLink)
-                .filter(GroupUserLink.user_id == db_user_for_group.id)
-                .first()
-            ) if db_user_for_group else None
+        async with get_async_session() as session:
+            result = await session.execute(
+                select(User).where(User.user_id == user_id)
+            )
+            db_user_for_group = result.scalars().first()
+
+            existing = None
+            if db_user_for_group:
+                result = await session.execute(
+                    select(GroupUserLink).where(
+                        GroupUserLink.user_id == db_user_for_group.id
+                    )
+                )
+                existing = result.scalars().first()
+
         if existing:
             log.info(
                 f"User {user_id} already in group {existing.group_id}, "
@@ -351,15 +373,19 @@ def apply_rule_actions(actions: dict, user: dict) -> None:
             )
         else:
             try:
-                with get_session() as session:
-                    group_exists = session.query(Group).filter(Group.id == int(group_id)).first()
+                async with get_async_session() as session:
+                    result = await session.execute(
+                        select(Group).where(Group.id == int(group_id))
+                    )
+                    group_exists = result.scalars().first()
+
                 if not group_exists:
                     log.warning(
                         f"Rule references group {group_id} which no longer exists, "
                         f"skipping group assignment for user {user_id}."
                     )
                 else:
-                    group_add_user(int(group_id), username)
+                    await group_add_user(int(group_id), username)
             except (ValueError, TypeError):
                 log.warning(
                     f"Could not assign user {user_id} to group {group_id}."
@@ -378,18 +404,17 @@ def _user_to_pseudo_jwt(user: User) -> dict:
     }
 
 
-def test_rules(rule_ids: list[int], realm: str | list[str] | None = None) -> list[dict]:
+async def test_rules(rule_ids: list[int], realm: str | list[str] | None = None) -> list[dict]:
     """
     Test which users would be matched by the given rules.
 
     Returns a list of dicts with user info and which rules matched.
     """
-    with get_session() as session:
-        rules = (
-            session.query(AttributeRule)
-            .filter(AttributeRule.id.in_(rule_ids))
-            .all()
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(AttributeRule).where(AttributeRule.id.in_(rule_ids))
         )
+        rules = result.scalars().all()
         if not rules:
             return []
 
@@ -403,20 +428,24 @@ def test_rules(rule_ids: list[int], realm: str | list[str] | None = None) -> lis
                     pass
         group_names = {}
         if group_ids:
-            groups = session.query(Group).filter(Group.id.in_(group_ids)).all()
+            groups_result = await session.execute(
+                select(Group).where(Group.id.in_(group_ids))
+            )
+            groups = groups_result.scalars().all()
             group_names = {str(g.id): g.name for g in groups}
 
-        query = session.query(User).filter(
+        stmt = select(User).where(
             User.deleted == False,  # noqa: E712
             User.username != "api_user",
         )
         if realm and realm != "*":
             if isinstance(realm, list):
-                query = query.filter(User.realm.in_(realm))
+                stmt = stmt.where(User.realm.in_(realm))
             else:
-                query = query.filter(User.realm == realm)
+                stmt = stmt.where(User.realm == realm)
 
-        users = query.all()
+        users_result = await session.execute(stmt)
+        users = users_result.scalars().all()
         results = []
 
         for user in users:

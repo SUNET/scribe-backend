@@ -54,7 +54,7 @@ async def get_user_info(
     """
 
     result = dict(user)
-    result["announcements"] = announcement_get_active()
+    result["announcements"] = await announcement_get_active()
     return JSONResponse(content={"result": result})
 
 
@@ -76,15 +76,15 @@ async def set_user_info(
     """
 
     if item.encryption and item.encryption_password:
-        user_update(
+        await user_update(
             user["user_id"],
             encryption_settings=item.encryption,
             encryption_password=item.encryption_password,
         )
     elif item.reset_password:
-        user_update(user["user_id"], reset_encryption=True)
+        await user_update(user["user_id"], reset_encryption=True)
     elif item.verify_password:
-        private_key = user_get_private_key(user["user_id"])
+        private_key = await user_get_private_key(user["user_id"])
 
         try:
             validate_private_key_password(private_key, item.encryption_password)
@@ -97,7 +97,7 @@ async def set_user_info(
                 status_code=403,
             )
     elif item.email is not None:
-        user_update(user["user_id"], email=item.email)
+        await user_update(user["user_id"], email=item.email)
     elif item.notifications:
         notifications_str = ""
 
@@ -127,7 +127,7 @@ async def set_user_info(
         ):
             notifications_str += "weekly_report,"
 
-        user_update(user["user_id"], notifications_str=notifications_str)
+        await user_update(user["user_id"], notifications_str=notifications_str)
 
     return JSONResponse(content={"result": {"status": "OK"}})
 

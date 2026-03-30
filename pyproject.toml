@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "aiofiles==24.1.0",
+    "aiosqlite>=0.20.0",
     "alembic>=1.17.1",
     "annotated-types==0.7.0",
     "anyio==4.9.0",
@@ -20,6 +21,7 @@ dependencies = [
     "dnspython==2.7.0",
     "ecdsa==0.19.1",
     "email-validator==2.2.0",
+    "greenlet>=3.0.0",
     "fastapi==0.115.12",
     "fastapi-cli==0.0.7",
     "fastapi-oidc==0.0.10",
@@ -38,6 +40,7 @@ dependencies = [
     "psutil==5.9.8",
     "psycopg2==2.9.10",
     "psycopg2-binary==2.9.10",
+    "asyncpg>=0.30.0",
     "pyasn1==0.4.8",
     "pycparser==2.22",
     "pydantic==2.11.4",

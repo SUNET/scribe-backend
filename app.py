@@ -203,7 +203,7 @@ async def analytics_middleware(request: Request, call_next):
     action = ANALYTICS_ROUTE_MAP.get((request.method, route.path))
     if action:
         try:
-            log_page_view(f"/action/{action}")
+            await log_page_view(f"/action/{action}")
         except Exception:
             pass
 
@@ -260,16 +260,20 @@ async def create_api_user() -> None:
         None
     """
 
-    if user_exists("api_user"):
-        return
+    if not await user_exists("api_user"):
+        await user_create("api_user", realm="none", user_id="api_user")
 
-    # Create user and add RSA keypair
-    user = user_create("api_user", realm="none", user_id="api_user")
-    user_update(
-        user["user_id"],
-        encryption_password=settings.API_PRIVATE_KEY_PASSWORD,
-        encryption_settings=True,
-    )
+    user = await user_get(username="api_user")
+
+    try:
+        await user_get_private_key(user["user_id"])
+        await user_get_public_key(user["user_id"])
+    except Exception:
+        await user_update(
+            user["user_id"],
+            encryption_password=settings.API_PRIVATE_KEY_PASSWORD,
+            encryption_settings=True,
+        )
 
 
 @app.get("/api/auth")
@@ -301,22 +305,22 @@ async def auth(request: Request):
         realm = decoded_jwt.get(
             "realm", username.split("@")[-1] if "@" in username else ""
         )
-        user = user_create(
+        user = await user_create(
             username=username,
             realm=realm,
             user_id=decoded_jwt["sub"],
             email=decoded_jwt.get("email", ""),
         )
-        actions = evaluate_rules(decoded_jwt, user)
+        actions = await evaluate_rules(decoded_jwt, user)
         if actions:
-            apply_rule_actions(actions, user)
+            await apply_rule_actions(actions, user)
 
         # Notify admins if a new user was created without being activated by
         # any rules. Should not send notifications for existing users or users
         # that were activated by rules, to avoid spamming admins with
         # notifications for every login.
         if user.get("created") and not actions.get("activate"):
-            notify_new_user_created(user)
+            await notify_new_user_created(user)
     except Exception as e:
         log.warning(f"Rule evaluation at login failed: {e}")
 
@@ -425,31 +429,6 @@ def remove_old_jobs() -> None:
 
 
 @app.on_event("startup")
-def create_api_user_on_startup() -> None:
-    """
-    Create the API user with RSA keypair on startup if it does not exist.
-
-    Returns:
-        None
-    """
-
-    if not user_exists("api_user"):
-        user = user_create("api_user", realm="none", user_id="api_user")
-
-    user = user_get(username="api_user")
-
-    try:
-        user_get_private_key(user["user_id"])
-        user_get_public_key(user["user_id"])
-    except Exception:
-        user_update(
-            user["user_id"],
-            encryption_password=settings.API_PRIVATE_KEY_PASSWORD,
-            encryption_settings=True,
-        )
-
-
-@app.on_event("startup")
 @repeat_every(seconds=60 * 60)
 def check_quota_alerts_task() -> None:
     """
@@ -467,12 +446,12 @@ def check_quota_alerts_task() -> None:
 
 
 @app.on_event("startup")
-def seed_onboarding_attributes_on_startup() -> None:
+async def seed_onboarding_attributes_on_startup() -> None:
     """
     Seed default onboarding attributes if the table is empty.
     """
 
-    seed_default_attributes()
+    await seed_default_attributes()
 
 
 @app.on_event("startup")

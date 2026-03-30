@@ -73,14 +73,14 @@ async def update_transcription_status(
         JSONResponse: The updated job status.
     """
 
-    user_id = user_get_from_job(job_id)
+    user_id = await user_get_from_job(job_id)
 
     if user_id is None or job_id is None:
         raise Exception("Job or user not found: {} - {}".format(job_id, user_id))
 
     file_path = Path(settings.API_FILE_STORAGE_DIR) / user_id / job_id
 
-    job = job_update(
+    job = await job_update(
         job_id,
         user_id,
         status=item.status,
@@ -94,7 +94,7 @@ async def update_transcription_status(
         )
 
     if job["status"] == JobStatusEnum.COMPLETED:
-        if not user_update(
+        if not await user_update(
             user_id,
             transcribed_seconds=item.transcribed_seconds,
             active=None,
@@ -103,10 +103,10 @@ async def update_transcription_status(
                 content={"result": {"error": "User not found"}}, status_code=404
             )
 
-        if email := user_get_notifications(user_id, "job"):
+        if email := await user_get_notifications(user_id, "job"):
             notifications.send_transcription_finished(email)
     elif job["status"] == JobStatusEnum.FAILED:
-        if email := user_get_notifications(user_id, "job"):
+        if email := await user_get_notifications(user_id, "job"):
             notifications.send_transcription_failed(email)
 
     # We don't want to keep files for failed or completed jobs
@@ -136,7 +136,7 @@ async def get_transcription_job(
         JSONResponse: The next available job.
     """
 
-    return JSONResponse(content={"result": jsonable_encoder(job_get_next())})
+    return JSONResponse(content={"result": jsonable_encoder(await job_get_next())})
 
 
 @router.get("/job/{user_id}/{job_id}/file", include_in_schema=False)
@@ -158,7 +158,7 @@ async def get_transcription_file(
         StreamingResponse: The encrypted file stream.
     """
 
-    if not job_get(job_id, user_id):
+    if not await job_get(job_id, user_id):
         return JSONResponse(
             content={"result": {"error": "Job not found"}}, status_code=404
         )
@@ -170,14 +170,14 @@ async def get_transcription_file(
             content={"result": {"error": "File not found"}}, status_code=404
         )
 
-    api_user = user_get(username="api_user")
+    api_user = await user_get(username="api_user")
 
     if not api_user:
         return JSONResponse(
             content={"result": {"error": "API user not found"}}, status_code=500
         )
 
-    private_key = user_get_private_key(api_user["user_id"])
+    private_key = await user_get_private_key(api_user["user_id"])
     private_key = deserialize_private_key_from_pem(
         private_key, settings.API_PRIVATE_KEY_PASSWORD
     )
@@ -217,7 +217,7 @@ async def put_video_file(
 
     filename = file.filename + ".enc"
 
-    if not job_get(job_id, user_id):
+    if not await job_get(job_id, user_id):
         return JSONResponse(
             content={"result": {"error": "Job not found"}}, status_code=404
         )
@@ -230,9 +230,9 @@ async def put_video_file(
     file_bytes = await file.read()
 
     if user_id.isnumeric():
-        user_id = user_get(username="api_user")["user_id"]
+        user_id = (await user_get(username="api_user"))["user_id"]
 
-    public_key = user_get_public_key(user_id)
+    public_key = await user_get_public_key(user_id)
     public_key = deserialize_public_key_from_pem(public_key)
 
     encrypt_data_to_file(
@@ -274,23 +274,23 @@ async def put_transcription_result(
         JSONResponse: The result of the upload.
     """
 
-    if not (job := job_get(job_id, user_id)):
+    if not (job := await job_get(job_id, user_id)):
         return JSONResponse(
             content={"result": {"error": "Job not found"}}, status_code=404
         )
 
     if user_id.isnumeric():
-        api_user = user_get(username="api_user")["user_id"]
-        public_key = user_get_public_key(api_user)
+        api_user = (await user_get(username="api_user"))["user_id"]
+        public_key = await user_get_public_key(api_user)
     else:
-        public_key = user_get_public_key(user_id)
+        public_key = await user_get_public_key(user_id)
 
     public_key = deserialize_public_key_from_pem(public_key)
 
     match item.format:
         case "srt":
             encrypted_result = encrypt_string(public_key, item.result)
-            job_result_save(
+            await job_result_save(
                 job_id,
                 user_id,
                 result_srt=encrypted_result,
@@ -299,7 +299,7 @@ async def put_transcription_result(
         case "json":
             json_str = json.dumps(item.result)
             encrypted_result = encrypt_string(public_key, json_str)
-            job_result_save(
+            await job_result_save(
                 job_id, user_id, result=encrypted_result, external_id=job["external_id"]
             )
         case "mp4":
@@ -309,7 +309,7 @@ async def put_transcription_result(
                 content={"result": {"error": "Unsupported format"}}, status_code=400
             )
 
-    job = job_update(
+    job = await job_update(
         job_id,
         status=JobStatusEnum.COMPLETED,
         error=None,

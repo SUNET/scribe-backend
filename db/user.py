@@ -21,7 +21,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from auth.client import dn_in_list
-from sqlalchemy import func
+from sqlalchemy import func, select
 from utils.log import get_logger
 
 from db.models import (
@@ -34,7 +34,7 @@ from db.models import (
     JobType,
     User,
 )
-from db.session import get_session
+from db.session import get_async_session
 from utils.crypto import (
     generate_rsa_keypair,
     serialize_private_key_to_pem,
@@ -47,7 +47,7 @@ settings = get_settings()
 log = get_logger()
 
 
-def user_create(
+async def user_create(
     username: str,
     realm: str,
     user_id: Optional[str] = None,
@@ -68,12 +68,11 @@ def user_create(
     if not user_id or not realm:
         raise ValueError("user_id and realm must be provided")
 
-    with get_session() as session:
-        user = (
-            session.query(User)
-            .filter((User.user_id == user_id) | (User.username == username))
-            .first()
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(User).where((User.user_id == user_id) | (User.username == username))
         )
+        user = result.scalars().first()
 
         if user:
             if email != "" and user.email == "":
@@ -110,20 +109,20 @@ def user_create(
         return result
 
 
-def notify_new_user_created(user: dict) -> None:
+async def notify_new_user_created(user: dict) -> None:
     """Send new-user notification emails to admins for the given user."""
 
     realm = user.get("realm", "")
     user_id = user.get("user_id", "")
     username = user.get("username", "")
 
-    admins = users_admin_domains_from_realm(realm)
+    admins = await users_admin_domains_from_realm(realm)
 
     for admin in admins:
         if not admin["admin"]:
             continue
 
-        if admin_email := user_get_notifications(admin["user_id"], "user"):
+        if admin_email := await user_get_notifications(admin["user_id"], "user"):
             if notifications.notification_sent_record_exists(
                 admin["user_id"], user_id, "user_creation"
             ):
@@ -136,7 +135,7 @@ def notify_new_user_created(user: dict) -> None:
             log.info(f"Sent new user creation notification to admin {admin_email}")
 
 
-def user_delete(username: str) -> bool:
+async def user_delete(username: str) -> bool:
     """
     Soft-delete a user by setting the deleted flag.
 
@@ -147,8 +146,11 @@ def user_delete(username: str) -> bool:
         bool: True if the user was soft-deleted, False if not found.
     """
 
-    with get_session() as session:
-        user = session.query(User).filter(User.username == username).first()
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(User).where(User.username == username)
+        )
+        user = result.scalars().first()
 
         if not user:
             return False
@@ -163,18 +165,21 @@ def user_delete(username: str) -> bool:
         user.notifications = None
 
         # Remove files and job results for the deleted user
-        jobs = session.query(Job).filter(Job.user_id == user.user_id).all()
+        job_result = await session.execute(
+            select(Job).where(Job.user_id == user.user_id)
+        )
+        jobs = job_result.scalars().all()
         for job in jobs:
             from db.job import job_remove
 
-            job_remove(job.uuid)
+            await job_remove(job.uuid)
 
         log.info(f"User {user.user_id} soft-deleted.")
 
         return True
 
 
-def user_exists(username: str) -> bool:
+async def user_exists(username: str) -> bool:
     """
     Check if a user exists by user_id.
 
@@ -184,13 +189,16 @@ def user_exists(username: str) -> bool:
     Returns:
         bool: True if the user exists, False otherwise.
     """
-    with get_session() as session:
-        user = session.query(User).filter(User.username == username).first()
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(User).where(User.username == username)
+        )
+        user = result.scalars().first()
 
         return user is not None
 
 
-def user_get_from_job(job_id: str) -> Optional[User]:
+async def user_get_from_job(job_id: str) -> Optional[User]:
     """
     Get a user by job_user_id.
 
@@ -200,11 +208,18 @@ def user_get_from_job(job_id: str) -> Optional[User]:
     Returns:
         Optional[User]: The user associated with the job, or None if not found.
     """
-    with get_session() as session:
-        if not (job := session.query(Job).filter(Job.uuid == job_id).first()):
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(Job).where(Job.uuid == job_id)
+        )
+        job = result.scalars().first()
+        if not job:
             return None
 
-        user = session.query(User).filter(User.user_id == job.user_id).first()
+        result = await session.execute(
+            select(User).where(User.user_id == job.user_id)
+        )
+        user = result.scalars().first()
 
         if user is None and dn_in_list(job.user_id):
             return job.user_id
@@ -212,7 +227,7 @@ def user_get_from_job(job_id: str) -> Optional[User]:
         return user.as_dict()["user_id"] if user else None
 
 
-def user_get_username_from_job(job_id: str) -> Optional[User]:
+async def user_get_username_from_job(job_id: str) -> Optional[User]:
     """
     Get a user by job_user_id.
 
@@ -222,16 +237,23 @@ def user_get_username_from_job(job_id: str) -> Optional[User]:
     Returns:
         Optional[User]: The user associated with the job, or None if not found.
     """
-    with get_session() as session:
-        if not (job := session.query(Job).filter(Job.uuid == job_id).first()):
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(Job).where(Job.uuid == job_id)
+        )
+        job = result.scalars().first()
+        if not job:
             return None
 
-        user = session.query(User).filter(User.user_id == job.user_id).first()
+        result = await session.execute(
+            select(User).where(User.user_id == job.user_id)
+        )
+        user = result.scalars().first()
 
         return user.as_dict()["username"] if user else None
 
 
-def user_get(
+async def user_get(
     user_id: Optional[str] = "", username: Optional[str] = ""
 ) -> Optional[User]:
     """
@@ -248,16 +270,22 @@ def user_get(
     if not user_id and not username:
         return {}
 
-    with get_session() as session:
+    async with get_async_session() as session:
         if user_id:
-            user = session.query(User).filter(User.user_id == user_id).first()
+            result = await session.execute(
+                select(User).where(User.user_id == user_id)
+            )
         else:
-            user = session.query(User).filter(User.username == username).first()
+            result = await session.execute(
+                select(User).where(User.username == username)
+            )
+
+        user = result.scalars().first()
 
         return user.as_dict()
 
 
-def user_get_private_key(user_id: str) -> Optional[str]:
+async def user_get_private_key(user_id: str) -> Optional[str]:
     """
     Get a users private key.
 
@@ -269,10 +297,11 @@ def user_get_private_key(user_id: str) -> Optional[str]:
     """
     log.info(f"Fetching private key for user {user_id}")
 
-    return user_get(user_id)["private_key"].encode("utf-8")
+    user = await user_get(user_id)
+    return user["private_key"].encode("utf-8")
 
 
-def user_get_public_key(user_id: str) -> Optional[str]:
+async def user_get_public_key(user_id: str) -> Optional[str]:
     """
     Get a users public key.
 
@@ -283,10 +312,11 @@ def user_get_public_key(user_id: str) -> Optional[str]:
         Optional[str]: The user's public key, or None if not found.
     """
 
-    return user_get(user_id)["public_key"].encode("utf-8")
+    user = await user_get(user_id)
+    return user["public_key"].encode("utf-8")
 
 
-def user_get_all(realm) -> list:
+async def user_get_all(realm) -> list:
     """
     Get all users in a realm or list of realms.
 
@@ -297,32 +327,30 @@ def user_get_all(realm) -> list:
     Returns:
         list: A list of users in the specified realm(s).
     """
-    with get_session() as session:
+    async with get_async_session() as session:
         if realm == "*":
-            q = (
-                session.query(User, Group)
+            stmt = (
+                select(User, Group)
                 .outerjoin(GroupUserLink, GroupUserLink.user_id == User.id)
                 .outerjoin(Group, Group.id == GroupUserLink.group_id)
             )
-            rows = q.all()
-
         elif isinstance(realm, list):
-            q = (
-                session.query(User, Group)
+            stmt = (
+                select(User, Group)
                 .outerjoin(GroupUserLink, GroupUserLink.user_id == User.id)
                 .outerjoin(Group, Group.id == GroupUserLink.group_id)
-                .filter(User.realm.in_(realm))
+                .where(User.realm.in_(realm))
             )
-            rows = q.all()
-
         else:
-            q = (
-                session.query(User, Group)
+            stmt = (
+                select(User, Group)
                 .outerjoin(GroupUserLink, GroupUserLink.user_id == User.id)
                 .outerjoin(Group, Group.id == GroupUserLink.group_id)
-                .filter(User.realm == realm)
+                .where(User.realm == realm)
             )
-            rows = q.all()
+
+        result = await session.execute(stmt)
+        rows = result.all()
 
         group_map = {}
 
@@ -332,16 +360,16 @@ def user_get_all(realm) -> list:
         }
         customer_name_map = {}
         if numeric_usernames:
-            customer_rows = (
-                session.query(Customer.partner_id, Customer.name)
-                .filter(Customer.partner_id.in_(numeric_usernames))
-                .all()
+            cust_result = await session.execute(
+                select(Customer.partner_id, Customer.name)
+                .where(Customer.partner_id.in_(numeric_usernames))
             )
+            customer_rows = cust_result.all()
             customer_name_map = {c.partner_id: c.name for c in customer_rows}
 
         for row in rows:
             user_dict = row[0].as_dict()
-            group_dict = row[1].as_dict() if row[1] else []
+            group_name = row[1].name if row[1] else ""
 
             if user_dict["username"] == "api_user" or user_dict.get("deleted"):
                 continue
@@ -352,19 +380,17 @@ def user_get_all(realm) -> list:
                     )
 
             if user_dict["id"] in group_map:
-                group_map[user_dict["id"]]["groups"] += ", " + group_dict["name"]
+                group_map[user_dict["id"]]["groups"] += ", " + group_name
             else:
                 group_map[user_dict["id"]] = user_dict
-                group_map[user_dict["id"]]["groups"] = (
-                    group_dict["name"] if group_dict else ""
-                )
+                group_map[user_dict["id"]]["groups"] = group_name
 
         result = list(group_map.values())
 
         return result
 
 
-def user_get_quota_left(user_id: str) -> bool:
+async def user_get_quota_left(user_id: str) -> bool:
     """
     Get the transcription quota left for a user.
 
@@ -375,10 +401,11 @@ def user_get_quota_left(user_id: str) -> bool:
         bool: True if the user has quota left, False otherwise.
     """
 
-    with get_session() as session:
-        groups = (
-            session.query(Group).filter(Group.users.any(User.user_id == user_id)).all()
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(Group).where(Group.users.any(User.user_id == user_id))
         )
+        groups = result.scalars().all()
 
         if not groups:
             return True
@@ -387,7 +414,7 @@ def user_get_quota_left(user_id: str) -> bool:
             if group.quota_seconds == 0:
                 return True
 
-            group_statistics_res = group_statistics(group.id, user_id, group.realm)
+            group_statistics_res = await group_statistics(group.id, user_id, group.realm)
 
             if not group_statistics_res:
                 return True
@@ -404,7 +431,7 @@ def user_get_quota_left(user_id: str) -> bool:
     return False
 
 
-def user_update(
+async def user_update(
     user_id: str,
     transcribed_seconds: Optional[str] = "",
     active: Optional[bool] = None,
@@ -434,13 +461,13 @@ def user_update(
         dict: The updated user as a dictionary.
     """
 
-    with get_session() as session:
-        user = (
-            session.query(User)
-            .filter(User.user_id == user_id)
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(User)
+            .where(User.user_id == user_id)
             .with_for_update()
-            .first()
         )
+        user = result.scalars().first()
 
         if not user:
             return {}
@@ -517,12 +544,15 @@ def user_update(
             user.public_key = None
 
             # Remove all files encrypted with the previous key
-            jobs = session.query(Job).filter(Job.user_id == user.user_id).all()
+            job_result = await session.execute(
+                select(Job).where(Job.user_id == user.user_id)
+            )
+            jobs = job_result.scalars().all()
 
             for job in jobs:
                 from db.job import job_remove
 
-                job_remove(job.uuid)
+                await job_remove(job.uuid)
 
         if email:
             log.info(f"Updating email for user {user.user_id} to {email}")
@@ -546,7 +576,7 @@ def user_update(
         return user.as_dict() if user else {}
 
 
-def user_get_email(user_id: str) -> Optional[str]:
+async def user_get_email(user_id: str) -> Optional[str]:
     """
     Get a user's email by user_id.
 
@@ -557,13 +587,16 @@ def user_get_email(user_id: str) -> Optional[str]:
         Optional[str]: The email associated with the user_id, or None if not found.
     """
 
-    with get_session() as session:
-        user = session.query(User).filter(User.user_id == user_id).first()
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(User).where(User.user_id == user_id)
+        )
+        user = result.scalars().first()
 
         return user.email if user else None
 
 
-def get_username_from_id(user_id: str) -> Optional[str]:
+async def get_username_from_id(user_id: str) -> Optional[str]:
     """
     Get a username by user_id.
 
@@ -574,13 +607,16 @@ def get_username_from_id(user_id: str) -> Optional[str]:
         Optional[str]: The username associated with the user_id, or None if not found.
     """
 
-    with get_session() as session:
-        user = session.query(User).filter(User.user_id == user_id).first()
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(User).where(User.user_id == user_id)
+        )
+        user = result.scalars().first()
 
     return user.username if user else None
 
 
-def users_statistics(
+async def users_statistics(
     group_id: Optional[str] = "",
     realm: Optional[str] = "",
     days: Optional[int] = 30,
@@ -600,22 +636,35 @@ def users_statistics(
         dict: A dictionary containing user statistics.
     """
 
-    with get_session() as session:
-        user = session.query(User).filter(User.user_id == user_id).first()
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(User).where(User.user_id == user_id)
+        )
+        user = result.scalars().first()
         user_domains = (
             user.admin_domains.split(",") if user and user.admin_domains else []
         )
 
         if group_id == "0":
             if realm == "*":
-                users = session.query(User).all()
+                users_result = await session.execute(select(User))
+                users = users_result.scalars().all()
             else:
-                users = session.query(User).filter(User.realm.in_(user_domains)).all()
+                users_result = await session.execute(
+                    select(User).where(User.realm.in_(user_domains))
+                )
+                users = users_result.scalars().all()
         else:
             if realm == "*":
-                group = session.query(Group).filter(Group.id == group_id).first()
+                group_result = await session.execute(
+                    select(Group).where(Group.id == group_id)
+                )
+                group = group_result.scalars().first()
             else:
-                group = session.query(Group).filter(Group.id == group_id).first()
+                group_result = await session.execute(
+                    select(Group).where(Group.id == group_id)
+                )
+                group = group_result.scalars().first()
 
             if not group:
                 return {
@@ -631,7 +680,13 @@ def users_statistics(
                     "job_queue": {},
                 }
 
-            users = group.users
+            # Need to load users via join since group.users would lazy-load
+            link_result = await session.execute(
+                select(User)
+                .join(GroupUserLink, GroupUserLink.user_id == User.id)
+                .where(GroupUserLink.group_id == group.id)
+            )
+            users = link_result.scalars().all()
 
         total_transcribed_minutes = 0
         total_transcribed_minutes_last_month = 0
@@ -674,19 +729,18 @@ def users_statistics(
 
         # Batch-fetch all jobs for the relevant time window instead of N+1 per user
         user_ids = [user.user_id for user in users]
-        all_jobs = (
-            (
-                session.query(Job)
-                .filter(
+        if user_ids:
+            jobs_result = await session.execute(
+                select(Job)
+                .where(
                     Job.user_id.in_(user_ids),
                     Job.job_type == JobType.TRANSCRIPTION,
                     Job.created_at >= first_day_prev_month,
                 )
-                .all()
             )
-            if user_ids
-            else []
-        )
+            all_jobs = jobs_result.scalars().all()
+        else:
+            all_jobs = []
 
         # Build a mapping of user_id -> jobs
         jobs_by_user = {}
@@ -697,11 +751,11 @@ def users_statistics(
         numeric_usernames = {u.username for u in users if u.username.isdigit()}
         customer_name_map = {}
         if numeric_usernames:
-            customer_rows = (
-                session.query(Customer.partner_id, Customer.name)
-                .filter(Customer.partner_id.in_(numeric_usernames))
-                .all()
+            cust_result = await session.execute(
+                select(Customer.partner_id, Customer.name)
+                .where(Customer.partner_id.in_(numeric_usernames))
             )
+            customer_rows = cust_result.all()
             customer_name_map = {c.partner_id: c.name for c in customer_rows}
 
         for user in users:
@@ -819,7 +873,7 @@ def users_statistics(
         }
 
 
-def group_statistics(group_id: str, user_id: str, realm: str) -> dict:
+async def group_statistics(group_id: str, user_id: str, realm: str) -> dict:
     """
     Get group statistics for a user.
 
@@ -832,7 +886,7 @@ def group_statistics(group_id: str, user_id: str, realm: str) -> dict:
         dict: A dictionary containing group statistics.
     """
 
-    stats = users_statistics(group_id=group_id, user_id=user_id, realm=realm)
+    stats = await users_statistics(group_id=group_id, user_id=user_id, realm=realm)
 
     condensed_stats = {
         "total_users": stats["total_users"],
@@ -847,7 +901,7 @@ def group_statistics(group_id: str, user_id: str, realm: str) -> dict:
     return condensed_stats
 
 
-def user_can_transcribe(user_id: str) -> int:
+async def user_can_transcribe(user_id: str) -> int:
     """
     Check which group a user belongs to and check whether the user have
     quota left or not.
@@ -862,13 +916,18 @@ def user_can_transcribe(user_id: str) -> int:
             >0 indicating the number of seconds left in the quota.
     """
 
-    with get_session() as session:
-        if not (user := session.query(User).filter(User.user_id == user_id).first()):
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(User).where(User.user_id == user_id)
+        )
+        user = result.scalars().first()
+        if not user:
             return 0
 
-        groups = (
-            session.query(Group).filter(Group.users.any(User.user_id == user_id)).all()
+        result = await session.execute(
+            select(Group).where(Group.users.any(User.user_id == user_id))
         )
+        groups = result.scalars().all()
 
         if not groups:
             return -1
@@ -883,7 +942,7 @@ def user_can_transcribe(user_id: str) -> int:
         return 0
 
 
-def user_get_notifications(user_id: str, notification: str) -> Optional[str]:
+async def user_get_notifications(user_id: str, notification: str) -> Optional[str]:
     """
     Get a user's notification settings by user_id.
 
@@ -895,8 +954,11 @@ def user_get_notifications(user_id: str, notification: str) -> Optional[str]:
         setting is enabled, or None if not found.
     """
 
-    with get_session() as session:
-        user = session.query(User).filter(User.user_id == user_id).first()
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(User).where(User.user_id == user_id)
+        )
+        user = result.scalars().first()
 
         if not user.notifications:
             return None
@@ -907,9 +969,9 @@ def user_get_notifications(user_id: str, notification: str) -> Optional[str]:
         return None
 
 
-def users_admin_domains_from_realm(realm: str) -> list:
+async def users_admin_domains_from_realm(realm: str) -> list:
     """
-    Get all users which have the ralm in their list of admin_domains.
+    Get all users which have the realm in their list of admin_domains.
 
     Parameters:
         realm (str): The realm/domain to filter users by.
@@ -918,11 +980,12 @@ def users_admin_domains_from_realm(realm: str) -> list:
         list: A list of users which have the realm in their admin_domains.
     """
 
-    with get_session() as session:
-        users = (
-            session.query(User)
-            .filter(User.admin_domains.ilike(realm), User.deleted == False)
-            .all()
-        )  # noqa: E712
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(User).where(
+                User.admin_domains.ilike(realm), User.deleted == False  # noqa: E712
+            )
+        )
+        users = result.scalars().all()
 
         return [user.as_dict() for user in users]

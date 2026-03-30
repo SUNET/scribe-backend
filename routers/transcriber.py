@@ -93,9 +93,9 @@ async def transcribe(
     """
 
     if job_id:
-        res = job_get(job_id, user["user_id"])
+        res = await job_get(job_id, user["user_id"])
     else:
-        res = job_get_all(user["user_id"])
+        res = await job_get_all(user["user_id"])
 
     # Try to decrypt filenames
     try:
@@ -108,7 +108,7 @@ async def transcribe(
 
     if encryption_password:
         try:
-            raw_private_key = user_get_private_key(user["user_id"])
+            raw_private_key = await user_get_private_key(user["user_id"])
             private_key = deserialize_private_key_from_pem(
                 raw_private_key, encryption_password
             )
@@ -144,21 +144,21 @@ async def transcribe_file(
         JSONResponse: The job status.
     """
 
-    user_public_key = user_get_public_key(user["user_id"])
+    user_public_key = await user_get_public_key(user["user_id"])
     user_public_key = deserialize_public_key_from_pem(user_public_key)
 
-    job = job_create(
+    job = await job_create(
         user_id=user["user_id"],
         job_type=JobType.TRANSCRIPTION,
         filename=encrypt_string(user_public_key, file.filename),
     )
 
-    if not (api_user := user_get(username="api_user")):
+    if not (api_user := await user_get(username="api_user")):
         return JSONResponse(
             content={"result": {"error": "API user not found"}}, status_code=500
         )
 
-    public_key = user_get_public_key(api_user["user_id"])
+    public_key = await user_get_public_key(api_user["user_id"])
     public_key = deserialize_public_key_from_pem(public_key)
 
     try:
@@ -177,9 +177,9 @@ async def transcribe_file(
             chunk_size=settings.CRYPTO_CHUNK_SIZE,
         )
 
-        job = job_update(job["uuid"], status=JobStatusEnum.UPLOADED)
+        job = await job_update(job["uuid"], status=JobStatusEnum.UPLOADED)
     except Exception as e:
-        job = job_update(
+        job = await job_update(
             job["uuid"], user["user_id"], status=JobStatusEnum.FAILED, error=str(e)
         )
         return JSONResponse(content={"result": {"error": str(e)}}, status_code=500)
@@ -217,13 +217,13 @@ async def delete_transcription_job(
         JSONResponse: The result of the deletion.
     """
 
-    if not job_get(job_id, user["user_id"]):
+    if not await job_get(job_id, user["user_id"]):
         return JSONResponse(
             content={"result": {"error": "Job not found"}}, status_code=404
         )
 
     # Delete the job from the database
-    job_remove(job_id)
+    await job_remove(job_id)
 
     # Remove the video file if it exists
     file_path = Path(api_file_storage_dir) / user["user_id"] / f"{job_id}.mp4"
@@ -259,7 +259,7 @@ async def update_transcription_status(
         JSONResponse: The updated job status.
     """
 
-    quota_left = user_get_quota_left(user["user_id"])
+    quota_left = await user_get_quota_left(user["user_id"])
 
     if not quota_left:
         logger.warning(f"Quota exceeded for user {user['user_id']}")
@@ -273,7 +273,7 @@ async def update_transcription_status(
         )
 
     if not (
-        job := job_update(
+        job := await job_update(
             job_id,
             user_id=user["user_id"],
             language=item.language,
@@ -292,7 +292,7 @@ async def update_transcription_status(
     filename = job["filename"]
 
     try:
-        raw_private_key = user_get_private_key(user["user_id"])
+        raw_private_key = await user_get_private_key(user["user_id"])
         if item.encryption_password:
             deserialized_key = deserialize_private_key_from_pem(
                 raw_private_key, item.encryption_password
@@ -336,23 +336,23 @@ async def put_transcription_result(
         JSONResponse: The result of the upload.
     """
     try:
-        if not job_get(job_id, user["user_id"]):
+        if not await job_get(job_id, user["user_id"]):
             return JSONResponse(
                 content={"result": {"error": "Job not found"}}, status_code=404
             )
 
-        public_key = user_get_public_key(user["user_id"])
+        public_key = await user_get_public_key(user["user_id"])
         public_key = deserialize_public_key_from_pem(public_key)
 
         match item.format:
             case "srt":
-                job_result_save(
+                await job_result_save(
                     job_id,
                     user["user_id"],
                     result_srt=encrypt_string(public_key, item.data),
                 )
             case "json":
-                job_result_save(
+                await job_result_save(
                     job_id,
                     user["user_id"],
                     result=encrypt_string(public_key, item.data),
@@ -386,12 +386,12 @@ async def get_transcription_result(
 
     data = await request.json()
     encryption_password = data.get("encryption_password", "")
-    private_key = user_get_private_key(user["user_id"])
+    private_key = await user_get_private_key(user["user_id"])
 
     if encryption_password == "":
         encrypted_result = False
 
-    if not (job_result := job_result_get(user["user_id"], job_id)):
+    if not (job_result := await job_result_get(user["user_id"], job_id)):
         return JSONResponse(
             content={"result": {"error": "Job result not found"}}, status_code=404
         )
