@@ -898,3 +898,21 @@ class Announcement(SQLModel, table=True):
             "created_at": str(self.created_at),
             "created_by": self.created_by,
         }
+
+
+class WorkerHealth(SQLModel, table=True):
+    __tablename__ = "worker_health"
+    __table_args__ = (
+        Index("ix_worker_health_worker_id", "worker_id"),
+        Index("ix_worker_health_worker_id_created_at", "worker_id", "created_at"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    worker_id: str = Field(description="Identifier of the GPU worker")
+    load_avg: float = Field(default=0, description="Load average")
+    memory_usage: float = Field(default=0, description="Memory usage")
+    gpu_usage: Optional[str] = Field(default=None, description="GPU usage as JSON")
+    created_at: datetime = Field(
+        default_factory=datetime.utcnow,
+        description="Timestamp when the health entry was recorded",
+    )
