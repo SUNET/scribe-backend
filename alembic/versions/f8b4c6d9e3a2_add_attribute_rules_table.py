@@ -38,16 +38,16 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 CONDITION_VALUES = (
-    "equals",
-    "not_equals",
-    "contains",
-    "not_contains",
-    "starts_with",
-    "ends_with",
-    "regex_match",
+    "EQUALS",
+    "NOT_EQUALS",
+    "CONTAINS",
+    "NOT_CONTAINS",
+    "STARTS_WITH",
+    "ENDS_WITH",
+    "REGEX_MATCH",
 )
 
-condition_enum = sa.Enum(*CONDITION_VALUES, name="attributeconditionenum")
+condition_enum = sa.Enum(*CONDITION_VALUES, name="attributeconditionenum", create_type=False)
 
 
 def upgrade() -> None:
@@ -66,7 +66,7 @@ def upgrade() -> None:
             sa.Column("attribute_name", sa.String(), nullable=False, index=True),
             sa.Column(
                 "attribute_condition",
-                sa.Enum(*CONDITION_VALUES, name="attributeconditionenum", create_type=False),
+                condition_enum,
                 nullable=False,
             ),
             sa.Column("attribute_value", sa.String(), nullable=False),
