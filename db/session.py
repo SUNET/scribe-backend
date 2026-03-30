@@ -41,10 +41,11 @@ def get_sessionmaker() -> sessionmaker:
 
     if not settings.API_DATABASE_URL.startswith("sqlite"):
         pool_opts = {
-            "pool_size": 10,
-            "max_overflow": 5,
+            "pool_size": 3,       # 3 × 8 = 24 base
+            "max_overflow": 2,    # burst to 5 × 8 = 40 max
             "pool_timeout": 30,
             "pool_recycle": 1800,
+            "pool_pre_ping": True,
         }
     else:
         pool_opts = {}
