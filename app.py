@@ -17,7 +17,7 @@
 
 import fcntl
 import os
-import requests
+import httpx
 import tempfile
 
 from fastapi import FastAPI, Request
@@ -379,11 +379,12 @@ async def refresh(request: Request, refresh_token: RefreshToken):
     }
 
     try:
-        response = requests.post(
-            settings.OIDC_REFRESH_URI,
-            data=data,
-        )
-        response.raise_for_status()
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                settings.OIDC_REFRESH_URI,
+                data=data,
+            )
+            response.raise_for_status()
     except Exception:
         return JSONResponse({"error": "Failed to refresh token"}, status_code=400)
 

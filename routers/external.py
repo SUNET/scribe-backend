@@ -16,13 +16,12 @@
 # limitations under the License.
 
 import aiofiles
-import requests
+import httpx
 
 from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import JSONResponse
-from starlette.concurrency import run_in_threadpool
 from db.job import (
     job_create,
     job_get_by_external_id,
@@ -177,9 +176,8 @@ async def transcribe_external_file(
     job = None
 
     try:
-        kaltura_repsonse = await run_in_threadpool(
-            lambda: requests.get(item.file_url, timeout=120)
-        )
+        async with httpx.AsyncClient() as client:
+            kaltura_repsonse = await client.get(item.file_url, timeout=120)
 
         if kaltura_repsonse.status_code != 200:
             raise Exception(
