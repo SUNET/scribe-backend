@@ -41,20 +41,24 @@ depends_on: Union[str, Sequence[str], None] = None
 def _ensure_severity_enum(bind: sa.engine.Connection) -> sa.Enum:
     """Create the severity enum type if it doesn't already exist."""
     severity_enum = sa.Enum(
-        "info", "maintenance", "major_incident",
+        "info",
+        "maintenance",
+        "major_incident",
         name="announcementseverityenum",
+        create_type=False,
     )
+
     # SQLite doesn't have native enum types — nothing to create
     if bind.dialect.name == "sqlite":
         return severity_enum
 
     result = bind.execute(
-        sa.text(
-            "SELECT 1 FROM pg_type WHERE typname = 'announcementseverityenum'"
-        )
+        sa.text("SELECT 1 FROM pg_type WHERE typname = 'announcementseverityenum'")
     )
+
     if not result.scalar():
         severity_enum.create(bind)
+
     return severity_enum
 
 
