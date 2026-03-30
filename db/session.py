@@ -39,7 +39,17 @@ def get_sessionmaker() -> sessionmaker:
         sessionmaker: A SQLAlchemy sessionmaker instance.
     """
 
-    engine = create_engine(settings.API_DATABASE_URL)
+    if not settings.API_DATABASE_URL.startswith("sqlite"):
+        pool_opts = {
+            "pool_size": 10,
+            "max_overflow": 5,
+            "pool_timeout": 30,
+            "pool_recycle": 1800,
+        }
+    else:
+        pool_opts = {}
+
+    engine = create_engine(settings.API_DATABASE_URL, **pool_opts)
 
     with engine.connect() as connection:
         if connection.dialect.name != "sqlite":
