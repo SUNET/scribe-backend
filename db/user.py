@@ -86,8 +86,10 @@ def user_create(
                 )
 
             user.last_login = datetime.utcnow()
+            result = user.as_dict()
+            result["created"] = False
 
-            return user.as_dict()
+            return result
 
         user = User(
             username=username,
@@ -102,7 +104,10 @@ def user_create(
 
         session.add(user)
 
-        return user.dict()
+        result = user.dict()
+        result["created"] = True
+
+        return result
 
 
 def notify_new_user_created(user: dict) -> None:

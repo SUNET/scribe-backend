@@ -121,8 +121,14 @@ ANALYTICS_ROUTE_MAP = {
     ("POST", f"{_prefix}/admin/groups"): "create_group",
     ("PUT", f"{_prefix}/admin/groups/{{group_id}}"): "edit_group",
     ("DELETE", f"{_prefix}/admin/groups/{{group_id}}"): "delete_group",
-    ("POST", f"{_prefix}/admin/groups/{{group_id}}/users/{{username}}"): "add_group_user",
-    ("DELETE", f"{_prefix}/admin/groups/{{group_id}}/users/{{username}}"): "remove_group_user",
+    (
+        "POST",
+        f"{_prefix}/admin/groups/{{group_id}}/users/{{username}}",
+    ): "add_group_user",
+    (
+        "DELETE",
+        f"{_prefix}/admin/groups/{{group_id}}/users/{{username}}",
+    ): "remove_group_user",
     ("POST", f"{_prefix}/admin/rules"): "create_rule",
     ("PUT", f"{_prefix}/admin/rules/{{rule_id}}"): "edit_rule",
     ("DELETE", f"{_prefix}/admin/rules/{{rule_id}}"): "delete_rule",
@@ -133,7 +139,10 @@ ANALYTICS_ROUTE_MAP = {
     ("DELETE", f"{_prefix}/admin/customers/{{customer_id}}"): "delete_customer",
     ("POST", f"{_prefix}/admin/announcements"): "create_announcement",
     ("PUT", f"{_prefix}/admin/announcements/{{announcement_id}}"): "edit_announcement",
-    ("DELETE", f"{_prefix}/admin/announcements/{{announcement_id}}"): "delete_announcement",
+    (
+        "DELETE",
+        f"{_prefix}/admin/announcements/{{announcement_id}}",
+    ): "delete_announcement",
 }
 
 
@@ -246,7 +255,9 @@ async def auth(request: Request):
     try:
         decoded_jwt = await verify_token(id_token=token["access_token"])
         username = decoded_jwt.get("preferred_username", "")
-        realm = decoded_jwt.get("realm", username.split("@")[-1] if "@" in username else "")
+        realm = decoded_jwt.get(
+            "realm", username.split("@")[-1] if "@" in username else ""
+        )
         user = user_create(
             username=username,
             realm=realm,
@@ -257,7 +268,11 @@ async def auth(request: Request):
         if actions:
             apply_rule_actions(actions, user)
 
-        if not actions.get("activate"):
+        # Notify admins if a new user was created without being activated by
+        # any rules. Should not send notifications for existing users or users
+        # that were activated by rules, to avoid spamming admins with
+        # notifications for every login.
+        if user.get("created") and not actions.get("activate"):
             notify_new_user_created(user)
     except Exception as e:
         log.warning(f"Rule evaluation at login failed: {e}")
