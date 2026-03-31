@@ -329,7 +329,7 @@ async def job_remove(uuid: str) -> bool:
         job.model_type = ""
         job.filename = ""
         job.error = ""
-        job.speakers = 0
+        job.speakers = "0"
         job.status = JobStatusEnum.DELETED
         job.output_format = OutputFormatEnum.NONE
 
@@ -450,7 +450,7 @@ def job_cleanup() -> None:
             job.model_type = ""
             job.filename = ""
             job.error = ""
-            job.speakers = 0
+            job.speakers = "0"
             job.status = JobStatusEnum.DELETED
             job.output_format = OutputFormatEnum.NONE
 
