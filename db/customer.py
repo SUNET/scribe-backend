@@ -107,10 +107,16 @@ async def customer_get_from_user_id(user_id: str) -> Optional[dict]:
         result = await session.execute(
             select(Customer).where(Customer.realms.like(f"%{realm}%"))
         )
-        if not (customer := result.scalars().first()):
-            return {}
+        candidates = result.scalars().all()
 
-        return customer.as_dict()
+        for customer in candidates:
+            customer_realms = [
+                r.strip() for r in customer.realms.split(",") if r.strip()
+            ]
+            if realm in customer_realms:
+                return customer.as_dict()
+
+        return {}
 
 
 async def customer_get(customer_id: str) -> Optional[dict]:
