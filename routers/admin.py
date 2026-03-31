@@ -252,7 +252,7 @@ async def list_groups(
     result = []
 
     for g in groups:
-        stats = await group_statistics(str(g["id"]), admin_user["user_id"], realm)
+        stats = await group_statistics(g["id"], admin_user["user_id"], realm)
 
         if g["name"] == "All users":
             g["nr_users"] = stats["total_users"]
@@ -314,7 +314,7 @@ async def create_group(
 @router.get("/admin/groups/{group_id}")
 async def get_group(
     request: Request,
-    group_id: str,
+    group_id: int,
     admin_user: dict = Depends(get_current_admin_user),
 ) -> JSONResponse:
     """
@@ -346,7 +346,7 @@ async def get_group(
 async def update_group(
     request: Request,
     item: UpdateGroupRequest,
-    group_id: str,
+    group_id: int,
     admin_user: dict = Depends(get_current_admin_user),
 ) -> JSONResponse:
     """
@@ -354,7 +354,7 @@ async def update_group(
 
     Parameters:
         request (Request): The incoming HTTP request.
-        group_id (str): The ID of the group.
+        group_id (int): The ID of the group.
         admin_user (dict): The current user.
 
     Returns:
@@ -459,7 +459,7 @@ async def remove_user_from_group(
 @router.get("/admin/groups/{group_id}/stats")
 async def group_stats(
     request: Request,
-    group_id: str,
+    group_id: int,
     admin_user: dict = Depends(get_current_admin_user),
 ) -> JSONResponse:
     """
@@ -467,7 +467,7 @@ async def group_stats(
 
     Parameters:
         request (Request): The incoming HTTP request.
-        group_id (str): The ID of the group.
+        group_id (int): The ID of the group.
         admin_user (dict): The current user.
 
     Returns:

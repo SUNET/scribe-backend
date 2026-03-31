@@ -115,7 +115,7 @@ async def create_customer(
 @router.get("/admin/customers/{customer_id}", include_in_schema=False)
 async def get_customer(
     request: Request,
-    customer_id: str,
+    customer_id: int,
     admin_user: dict = Depends(get_current_admin_user),
 ) -> JSONResponse:
     """
@@ -123,7 +123,7 @@ async def get_customer(
 
     Parameters:
         request (Request): The incoming HTTP request.
-        customer_id (str): The ID of the customer.
+        customer_id (int): The ID of the customer.
         admin_user (dict): The current user.
 
     Returns:
@@ -140,7 +140,7 @@ async def get_customer(
 async def update_customer(
     request: Request,
     item: UpdateCustomerRequest,
-    customer_id: str,
+    customer_id: int,
     admin_user: dict = Depends(get_current_admin_user),
 ) -> JSONResponse:
     """
@@ -148,7 +148,7 @@ async def update_customer(
 
     Parameters:
         request (Request): The incoming HTTP request.
-        customer_id (str): The ID of the customer.
+        customer_id (int): The ID of the customer.
         admin_user (dict): The current user.
 
     Returns:
@@ -233,7 +233,7 @@ async def list_realms(
 @router.get("/admin/customers/{customer_id}/stats", include_in_schema=False)
 async def customer_stats(
     request: Request,
-    customer_id: str,
+    customer_id: int,
     admin_user: dict = Depends(get_current_admin_user),
 ) -> JSONResponse:
     """
@@ -241,7 +241,7 @@ async def customer_stats(
 
     Parameters:
         request (Request): The incoming HTTP request.
-        customer_id (str): The ID of the customer.
+        customer_id (int): The ID of the customer.
         admin_user (dict): The current user.
 
     Returns:

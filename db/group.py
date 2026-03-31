@@ -74,12 +74,12 @@ async def group_create(
         return group.as_dict()
 
 
-async def group_get(group_id: str, realm: str, user_id: Optional[str] = "") -> Optional[dict]:
+async def group_get(group_id: int, realm: str, user_id: Optional[str] = "") -> Optional[dict]:
     """
     Get a group by id with its users and models.
 
     Parameters:
-        group_id (str): The ID of the group to retrieve.
+        group_id (int): The ID of the group to retrieve.
         realm (str): The realm/domain to filter users.
         user_id (Optional[str]): The user ID of the requester for permission checks.
 
@@ -88,7 +88,7 @@ async def group_get(group_id: str, realm: str, user_id: Optional[str] = "") -> O
     """
 
     async with get_async_session() as session:
-        if group_id == "0":
+        if group_id == 0:
             # Default group with all users
             group = Group(name="All users", realm=realm)
         else:
@@ -188,11 +188,11 @@ async def group_get_from_user_id(user_id: str) -> list[dict]:
 
     async with get_async_session() as session:
         result = await session.execute(
-            select(Group).where(Group.users.any(User.user_id == user_id))
+            select(Group)
+            .where(Group.users.any(User.user_id == user_id))
+            .options(*_group_eager_options())
         )
-        groups = result.scalars().all()
-
-    return groups
+        return [g.as_dict() for g in result.scalars().all()]
 
 
 async def group_get_all(user_id: str, realm: str) -> list[dict]:
@@ -360,7 +360,7 @@ async def group_delete(group_id: int) -> bool:
 
 
 async def group_update(
-    group_id: str,
+    group_id: int,
     name: Optional[str] = None,
     description: Optional[str] = None,
     usernames: Optional[list[int]] = None,
@@ -488,21 +488,30 @@ async def group_add_user(group_id: int, username: str, role: str = "member") -> 
         return {"group_id": group_id, "user_id": user_id, "role": role}
 
 
-async def group_remove_user(group_id: int, user_id: int) -> bool:
+async def group_remove_user(group_id: int, username: str) -> bool:
     """
     Remove a user from a group.
 
     Parameters:
         group_id (int): The ID of the group.
-        user_id (int): The ID of the user to remove.
+        username (str): The username of the user to remove.
 
     Returns:
         bool: True if the user was removed, False otherwise.
     """
     async with get_async_session() as session:
         result = await session.execute(
+            select(User).where(
+                User.username == username, User.deleted == False  # noqa: E712
+            )
+        )
+        user = result.scalars().first()
+        if not user:
+            return False
+
+        result = await session.execute(
             select(GroupUserLink).where(
-                GroupUserLink.group_id == group_id, GroupUserLink.user_id == user_id
+                GroupUserLink.group_id == group_id, GroupUserLink.user_id == user.id
             )
         )
         link = result.scalars().first()
@@ -512,7 +521,7 @@ async def group_remove_user(group_id: int, user_id: int) -> bool:
 
         await session.delete(link)
 
-        log.info(f"User {user_id} removed from group {group_id}.")
+        log.info(f"User {username} removed from group {group_id}.")
 
         return True
 
@@ -584,12 +593,12 @@ async def group_list() -> list[dict]:
         return [g.as_dict() for g in result.scalars().all()]
 
 
-async def group_get_users(group_id: str, realm: str) -> list[dict]:
+async def group_get_users(group_id: int, realm: str) -> list[dict]:
     """
     Get all users in a group.
 
     Parameters:
-        group_id (str): The ID of the group.
+        group_id (int): The ID of the group.
         realm (str): The realm/domain to filter users.
 
     Returns:

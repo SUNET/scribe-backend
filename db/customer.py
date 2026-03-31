@@ -119,12 +119,12 @@ async def customer_get_from_user_id(user_id: str) -> Optional[dict]:
         return {}
 
 
-async def customer_get(customer_id: str) -> Optional[dict]:
+async def customer_get(customer_id: int) -> Optional[dict]:
     """
     Get a customer by id.
 
     Parameters:
-        customer_id (str): The ID of the customer to retrieve.
+        customer_id (int): The ID of the customer to retrieve.
 
     Returns:
         Optional[dict]: Dictionary representation of the customer if found, else empty dict.
@@ -201,7 +201,7 @@ async def customer_get_all(admin_user: dict) -> list[dict]:
 
 
 async def customer_update(
-    customer_id: Optional[str] = None,
+    customer_id: Optional[int] = None,
     customer_abbr: Optional[str] = None,
     partner_id: Optional[str] = None,
     name: Optional[str] = None,
@@ -217,7 +217,7 @@ async def customer_update(
     Update customer metadata.
 
     Parameters:
-        customer_id (Optional[str]): The ID of the customer to update.
+        customer_id (Optional[int]): The ID of the customer to update.
         customer_abbr (Optional[str]): New abbreviation for the customer.
         partner_id (Optional[str]): New partner ID for the customer.
         name (Optional[str]): New name for the customer.
@@ -290,14 +290,14 @@ async def customer_delete(customer_id: int) -> bool:
     return True
 
 
-async def customer_get_statistics(customer_id: str) -> dict:
+async def customer_get_statistics(customer_id: int) -> dict:
     """
     Get statistics for a specific customer.
     Calculates transcription statistics for all users in the customer's realms.
     For fixed plan customers, calculates block usage and overages.
 
     Parameters:
-        customer_id (str): The ID of the customer to get statistics for.
+        customer_id (int): The ID of the customer to get statistics for.
 
     Returns:
         dict: Dictionary containing customer statistics.
@@ -677,7 +677,7 @@ async def export_customers_to_csv(admin_user: dict) -> str:
     return output.getvalue()
 
 
-def _customer_get_statistics_sync(customer_id: str) -> dict:
+def _customer_get_statistics_sync(customer_id: int) -> dict:
     """Sync version of customer_get_statistics for APScheduler background tasks."""
 
     with get_session() as session:
@@ -865,7 +865,7 @@ def check_quota_alerts() -> None:
                 admin_users = (
                     session.query(User)
                     .filter(
-                        User.admin is True,
+                        User.admin == True,  # noqa: E712
                         User.deleted == False,  # noqa: E712
                         User.admin_domains.ilike(f"%{realm}%"),
                     )

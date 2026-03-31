@@ -94,7 +94,7 @@ async def user_create(
             username=username,
             realm=realm,
             user_id=user_id,
-            transcribed_seconds="0",
+            transcribed_seconds=0,
             last_login=datetime.utcnow(),
             email=email,
         )
@@ -298,6 +298,8 @@ async def user_get_private_key(user_id: str) -> Optional[str]:
     log.info(f"Fetching private key for user {user_id}")
 
     user = await user_get(user_id)
+    if not user or not user.get("private_key"):
+        return None
     return user["private_key"].encode("utf-8")
 
 
@@ -313,6 +315,8 @@ async def user_get_public_key(user_id: str) -> Optional[str]:
     """
 
     user = await user_get(user_id)
+    if not user or not user.get("public_key"):
+        return None
     return user["public_key"].encode("utf-8")
 
 
@@ -645,7 +649,7 @@ async def users_statistics(
             user.admin_domains.split(",") if user and user.admin_domains else []
         )
 
-        if group_id == "0":
+        if group_id == 0:
             if realm == "*":
                 users_result = await session.execute(select(User))
                 users = users_result.scalars().all()
@@ -873,7 +877,7 @@ async def users_statistics(
         }
 
 
-async def group_statistics(group_id: str, user_id: str, realm: str) -> dict:
+async def group_statistics(group_id: int, user_id: str, realm: str) -> dict:
     """
     Get group statistics for a user.
 
@@ -933,11 +937,11 @@ async def user_can_transcribe(user_id: str) -> int:
             return -1
 
         for group in groups:
-            if group.transcription_quota == 0:
+            if group.quota_seconds == 0:
                 return -1  # Unlimited quota
 
-            if user.transcribed_seconds < group.transcription_quota:
-                return group.transcription_quota - user.transcribed_seconds
+            if user.transcribed_seconds < group.quota_seconds:
+                return group.quota_seconds - user.transcribed_seconds
 
         return 0
 
