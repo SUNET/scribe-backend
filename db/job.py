@@ -268,7 +268,7 @@ async def job_update(
         if model_type:
             job.model_type = model_type
         if speakers:
-            job.speakers = speakers
+            job.speakers = str(speakers)
         if output_format:
             job.output_format = output_format
         if transcribed_seconds:
