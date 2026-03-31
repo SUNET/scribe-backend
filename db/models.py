@@ -227,6 +227,8 @@ class Job(SQLModel, table=True):
     __table_args__ = (
         Index("ix_jobs_user_id_job_type", "user_id", "job_type"),
         Index("ix_jobs_status_deletion_date", "status", "deletion_date"),
+        Index("ix_jobs_user_id_created_at", "user_id", "created_at"),
+        Index("ix_jobs_status_created_at", "status", "created_at"),
     )
 
     id: Optional[int] = Field(default=None, primary_key=True, description="Primary key")
