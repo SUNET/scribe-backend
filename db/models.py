@@ -739,13 +739,13 @@ class AttributeConditionEnum(str, Enum):
     Enum representing the condition type for attribute matching.
     """
 
-    EQUALS = "equals"
-    NOT_EQUALS = "not_equals"
-    CONTAINS = "contains"
-    NOT_CONTAINS = "not_contains"
-    STARTS_WITH = "starts_with"
-    ENDS_WITH = "ends_with"
-    REGEX_MATCH = "regex_match"
+    EQUALS = "EQUALS"
+    NOT_EQUALS = "NOT_EQUALS"
+    CONTAINS = "CONTAINS"
+    NOT_CONTAINS = "NOT_CONTAINS"
+    STARTS_WITH = "STARTS_WITH"
+    ENDS_WITH = "ENDS_WITH"
+    REGEX_MATCH = "REGEX_MATCH"
 
 
 class AttributeRule(SQLModel, table=True):
