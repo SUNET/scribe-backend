@@ -361,6 +361,15 @@ async def update_group(
         JSONResponse: The result of the operation.
     """
 
+    if admin_user["bofh"]:
+        realm = "*"
+    else:
+        realm = admin_user["realm"]
+
+    group = await group_get(group_id, realm=realm, user_id=admin_user["user_id"])
+    if not group:
+        return JSONResponse(content={"error": "Group not found"}, status_code=404)
+
     try:
         if not await group_update(
             group_id,
@@ -394,6 +403,15 @@ async def delete_group(
         JSONResponse: The result of the operation.
     """
 
+    if admin_user["bofh"]:
+        realm = "*"
+    else:
+        realm = admin_user["realm"]
+
+    group = await group_get(group_id, realm=realm, user_id=admin_user["user_id"])
+    if not group:
+        return JSONResponse(content={"error": "Group not found"}, status_code=404)
+
     if not await group_delete(group_id):
         return JSONResponse(content={"error": "Group not found"}, status_code=404)
 
@@ -419,6 +437,15 @@ async def add_user_to_group(
     Returns:
         JSONResponse: The result of the operation.
     """
+
+    if admin_user["bofh"]:
+        realm = "*"
+    else:
+        realm = admin_user["realm"]
+
+    group = await group_get(group_id, realm=realm, user_id=admin_user["user_id"])
+    if not group:
+        return JSONResponse(content={"error": "Group not found"}, status_code=404)
 
     if not await group_add_user(group_id, username):
         return JSONResponse(
@@ -447,6 +474,15 @@ async def remove_user_from_group(
     Returns:
         JSONResponse: The result of the operation.
     """
+
+    if admin_user["bofh"]:
+        realm = "*"
+    else:
+        realm = admin_user["realm"]
+
+    group = await group_get(group_id, realm=realm, user_id=admin_user["user_id"])
+    if not group:
+        return JSONResponse(content={"error": "Group not found"}, status_code=404)
 
     if not await group_remove_user(group_id, username):
         return JSONResponse(

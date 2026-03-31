@@ -646,7 +646,9 @@ async def users_statistics(
         )
         user = result.scalars().first()
         user_domains = (
-            user.admin_domains.split(",") if user and user.admin_domains else []
+            [d.strip() for d in user.admin_domains.split(",")]
+            if user and user.admin_domains
+            else []
         )
 
         if group_id == 0:
@@ -665,8 +667,23 @@ async def users_statistics(
                 )
                 group = group_result.scalars().first()
             else:
+                if not user_domains:
+                    return {
+                        "total_users": 0,
+                        "active_users": [],
+                        "transcribed_files": 0,
+                        "transcribed_files_last_month": 0,
+                        "total_transcribed_minutes": 0,
+                        "total_transcribed_minutes_last_month": 0,
+                        "transcribed_minutes_per_day": {},
+                        "transcribed_minutes_per_day_previous_month": {},
+                        "transcribed_minutes_per_user": {},
+                        "job_queue": {},
+                    }
                 group_result = await session.execute(
-                    select(Group).where(Group.id == group_id)
+                    select(Group)
+                    .where(Group.id == group_id)
+                    .where(Group.realm.in_(user_domains))
                 )
                 group = group_result.scalars().first()
 
