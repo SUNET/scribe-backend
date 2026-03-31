@@ -112,12 +112,12 @@ def get_session() -> Generator[Session, None, None]:
 
     try:
         yield session
+        session.commit()
     except Exception:
         log.error("Session rollback because of exception", exc_info=True)
         session.rollback()
         raise
     finally:
-        session.commit()
         session.close()
 
 
@@ -184,10 +184,10 @@ async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
 
     try:
         yield session
+        await session.commit()
     except Exception:
         log.error("Async session rollback because of exception", exc_info=True)
         await session.rollback()
         raise
     finally:
-        await session.commit()
         await session.close()
