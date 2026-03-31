@@ -311,7 +311,9 @@ async def auth(request: Request):
             user_id=decoded_jwt["sub"],
             email=decoded_jwt.get("email", ""),
         )
+        log.info(f"About to evaluate rules for user {user.get('user_id', '')}.")
         actions = await evaluate_rules(decoded_jwt, user)
+        log.info(f"Rule evaluation result for user {user.get('user_id', '')}: {actions}")
         if actions:
             await apply_rule_actions(actions, user)
 
@@ -322,7 +324,7 @@ async def auth(request: Request):
         if user.get("created") and not actions.get("activate"):
             await notify_new_user_created(user)
     except Exception as e:
-        log.warning(f"Rule evaluation at login failed: {e}")
+        log.warning(f"Rule evaluation at login failed: {e}", exc_info=True)
 
     url = f"{settings.OIDC_FRONTEND_URI}/?token={token['id_token']}"
 

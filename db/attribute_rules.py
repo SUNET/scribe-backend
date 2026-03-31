@@ -243,6 +243,13 @@ async def evaluate_rules(decoded_jwt: dict, user: dict) -> dict:
 
     manually_activated = user.get("manually_activated", False)
 
+    # Enrich the JWT with derived attributes so that rules can match on
+    # synthetic fields (e.g. "domain") the same way test_rules does.
+    domain = username.split("@")[-1] if "@" in username else ""
+    enriched_jwt = {**decoded_jwt}
+    enriched_jwt.setdefault("domain", domain)
+    enriched_jwt.setdefault("realm", realm)
+
     actions = {
         "activate": False,
         "admin": False,
@@ -259,15 +266,24 @@ async def evaluate_rules(decoded_jwt: dict, user: dict) -> dict:
         rules = result.scalars().all()
 
         for rule in rules:
+            log.info(
+                f"Evaluating rule '{rule.name}' (id={rule.id}): "
+                f"attribute={rule.attribute_name}, condition={rule.attribute_condition.value}, "
+                f"value='{rule.attribute_value}', realm='{rule.realm}', "
+                f"user_realm='{realm}'."
+            )
+
             # Check realm scope
             if rule.realm:
                 rule_realms = [r.strip() for r in rule.realm.split(",") if r.strip()]
                 if rule_realms and realm not in rule_realms:
+                    log.info(f"Rule '{rule.name}' skipped: realm mismatch ({realm} not in {rule_realms}).")
                     continue
 
-            claim_values = _get_claim_values(decoded_jwt, rule.attribute_name)
+            claim_values = _get_claim_values(enriched_jwt, rule.attribute_name)
 
             if not claim_values:
+                log.info(f"Rule '{rule.name}' skipped: no claim values for '{rule.attribute_name}'.")
                 continue
 
             matched = any(
@@ -276,6 +292,10 @@ async def evaluate_rules(decoded_jwt: dict, user: dict) -> dict:
             )
 
             if not matched:
+                log.info(
+                    f"Rule '{rule.name}' skipped: condition not met "
+                    f"(claim_values={claim_values}, expected '{rule.attribute_value}')."
+                )
                 continue
 
             rule_actions = []
