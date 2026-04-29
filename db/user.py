@@ -1,14 +1,40 @@
+# Copyright (c) 2025-2026 Sunet.
+# Contributor: Kristofer Hallin
+#
+# This file is part of Sunet Scribe.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import calendar
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Optional
 
 from auth.client import dn_in_list
+from sqlalchemy import func, select
 from utils.log import get_logger
 
-from db.job import job_get_all, job_remove
-from db.models import Customer, Group, GroupUserLink, Job, User
-from db.session import get_session
+from db.models import (
+    Customer,
+    Group,
+    GroupUserLink,
+    Job,
+    JobResult,
+    JobStatusEnum,
+    JobType,
+    User,
+)
+from db.session import get_async_session
 from utils.crypto import (
     generate_rsa_keypair,
     serialize_private_key_to_pem,
@@ -21,7 +47,7 @@ settings = get_settings()
 log = get_logger()
 
 
-def user_create(
+async def user_create(
     username: str,
     realm: str,
     user_id: Optional[str] = None,
@@ -42,58 +68,118 @@ def user_create(
     if not user_id or not realm:
         raise ValueError("user_id and realm must be provided")
 
-    with get_session() as session:
-        user = (
-            session.query(User)
-            .filter((User.user_id == user_id) | (User.username == username))
-            .first()
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(User).where((User.user_id == user_id) | (User.username == username))
         )
+        user = result.scalars().first()
 
         if user:
             if email != "" and user.email == "":
                 user.email = email
 
-            user.last_login = datetime.utcnow()
+            if user.deleted:
+                user.deleted = False
+                log.info(
+                    f"User {user.user_id} was previously deleted, resetting deleted flag."
+                )
 
-            return user.as_dict()
+            user.last_login = datetime.now(UTC).replace(tzinfo=None)
+            result = user.as_dict()
+            result["created"] = False
+
+            return result
 
         user = User(
             username=username,
             realm=realm,
             user_id=user_id,
-            transcribed_seconds="0",
-            last_login=datetime.utcnow(),
+            transcribed_seconds=0,
+            last_login=datetime.now(UTC).replace(tzinfo=None),
             email=email,
         )
 
-        log.info(f"User {username} created with realm {realm}.")
+        log.info(f"User {user_id} created with realm {realm}.")
 
         session.add(user)
 
-        # Figure out which users we should send a notification
-        # email to about the new user creation.
-        admins = users_admin_domains_from_realm(realm)
+        result = user.dict()
+        result["created"] = True
 
-        for admin in admins:
-            if not admin["admin"]:
+        return result
+
+
+async def notify_new_user_created(user: dict) -> None:
+    """Send new-user notification emails to admins for the given user."""
+
+    realm = user.get("realm", "")
+    user_id = user.get("user_id", "")
+    username = user.get("username", "")
+
+    admins = await users_admin_domains_from_realm(realm)
+
+    for admin in admins:
+        if not admin["admin"]:
+            continue
+
+        if admin_email := await user_get_notifications(admin["user_id"], "user"):
+            if notifications.notification_sent_record_exists(
+                admin["user_id"], user_id, "user_creation"
+            ):
                 continue
 
-            if admin_email := user_get_notifications(admin["user_id"], "user"):
-                if notifications.notification_sent_record_exists(
-                    admin["user_id"], user.user_id, "user_creation"
-                ):
-                    continue
-
-                notifications.send_new_user_created(admin_email, username)
-                notifications.notification_sent_record_add(
-                    admin["user_id"], user.user_id, "user_creation"
-                )
-                log.info(f"Sent new user creation notification to admin {admin_email}")
-
-        return user.dict()
+            notifications.send_new_user_created(admin_email, username)
+            notifications.notification_sent_record_add(
+                admin["user_id"], user_id, "user_creation"
+            )
+            log.info(f"Sent new user creation notification to admin {admin_email}")
 
 
-def user_exists(username: str) -> bool:
+async def user_delete(username: str) -> bool:
+    """
+    Soft-delete a user by setting the deleted flag.
+
+    Parameters:
+        username (str): The username of the user to delete.
+
+    Returns:
+        bool: True if the user was soft-deleted, False if not found.
+    """
+
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(User).where(User.username == username)
+        )
+        user = result.scalars().first()
+
+        if not user:
+            return False
+
+        user.deleted = True
+        user.active = False
+        user.admin = False
+        user.bofh = False
+        user.encryption_settings = False
+        user.private_key = None
+        user.public_key = None
+        user.notifications = None
+
+        # Remove files and job results for the deleted user
+        job_result = await session.execute(
+            select(Job).where(Job.user_id == user.user_id)
+        )
+        jobs = job_result.scalars().all()
+        for job in jobs:
+            from db.job import job_remove
+
+            await job_remove(job.uuid)
+
+        log.info(f"User {user.user_id} soft-deleted.")
+
+        return True
+
+
+async def user_exists(username: str) -> bool:
     """
     Check if a user exists by user_id.
 
@@ -103,13 +189,16 @@ def user_exists(username: str) -> bool:
     Returns:
         bool: True if the user exists, False otherwise.
     """
-    with get_session() as session:
-        user = session.query(User).filter(User.username == username).first()
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(User).where(User.username == username)
+        )
+        user = result.scalars().first()
 
         return user is not None
 
 
-def user_get_from_job(job_id: str) -> Optional[User]:
+async def user_get_from_job(job_id: str) -> Optional[User]:
     """
     Get a user by job_user_id.
 
@@ -119,11 +208,18 @@ def user_get_from_job(job_id: str) -> Optional[User]:
     Returns:
         Optional[User]: The user associated with the job, or None if not found.
     """
-    with get_session() as session:
-        if not (job := session.query(Job).filter(Job.uuid == job_id).first()):
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(Job).where(Job.uuid == job_id)
+        )
+        job = result.scalars().first()
+        if not job:
             return None
 
-        user = session.query(User).filter(User.user_id == job.user_id).first()
+        result = await session.execute(
+            select(User).where(User.user_id == job.user_id)
+        )
+        user = result.scalars().first()
 
         if user is None and dn_in_list(job.user_id):
             return job.user_id
@@ -131,7 +227,7 @@ def user_get_from_job(job_id: str) -> Optional[User]:
         return user.as_dict()["user_id"] if user else None
 
 
-def user_get_username_from_job(job_id: str) -> Optional[User]:
+async def user_get_username_from_job(job_id: str) -> Optional[User]:
     """
     Get a user by job_user_id.
 
@@ -141,16 +237,23 @@ def user_get_username_from_job(job_id: str) -> Optional[User]:
     Returns:
         Optional[User]: The user associated with the job, or None if not found.
     """
-    with get_session() as session:
-        if not (job := session.query(Job).filter(Job.uuid == job_id).first()):
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(Job).where(Job.uuid == job_id)
+        )
+        job = result.scalars().first()
+        if not job:
             return None
 
-        user = session.query(User).filter(User.user_id == job.user_id).first()
+        result = await session.execute(
+            select(User).where(User.user_id == job.user_id)
+        )
+        user = result.scalars().first()
 
         return user.as_dict()["username"] if user else None
 
 
-def user_get(
+async def user_get(
     user_id: Optional[str] = "", username: Optional[str] = ""
 ) -> Optional[User]:
     """
@@ -167,16 +270,22 @@ def user_get(
     if not user_id and not username:
         return {}
 
-    with get_session() as session:
+    async with get_async_session() as session:
         if user_id:
-            user = session.query(User).filter(User.user_id == user_id).first()
+            result = await session.execute(
+                select(User).where(User.user_id == user_id)
+            )
         else:
-            user = session.query(User).filter(User.username == username).first()
+            result = await session.execute(
+                select(User).where(User.username == username)
+            )
+
+        user = result.scalars().first()
 
         return user.as_dict()
 
 
-def user_get_private_key(user_id: str) -> Optional[str]:
+async def user_get_private_key(user_id: str) -> Optional[str]:
     """
     Get a users private key.
 
@@ -188,10 +297,13 @@ def user_get_private_key(user_id: str) -> Optional[str]:
     """
     log.info(f"Fetching private key for user {user_id}")
 
-    return user_get(user_id)["private_key"].encode("utf-8")
+    user = await user_get(user_id)
+    if not user or not user.get("private_key"):
+        return None
+    return user["private_key"].encode("utf-8")
 
 
-def user_get_public_key(user_id: str) -> Optional[str]:
+async def user_get_public_key(user_id: str) -> Optional[str]:
     """
     Get a users public key.
 
@@ -202,69 +314,87 @@ def user_get_public_key(user_id: str) -> Optional[str]:
         Optional[str]: The user's public key, or None if not found.
     """
 
-    return user_get(user_id)["public_key"].encode("utf-8")
+    user = await user_get(user_id)
+    if not user or not user.get("public_key"):
+        return None
+    return user["public_key"].encode("utf-8")
 
 
-def user_get_all(realm) -> list:
+async def user_get_all(realm) -> list:
     """
-    Get all users in a realm.
+    Get all users in a realm or list of realms.
 
     Parameters:
-        realm (str): The realm/domain to filter users by. Use "*" to get all users.
+        realm: The realm(s) to filter users by. Use "*" to get all users,
+               or pass a list of realm strings.
 
     Returns:
-        list: A list of users in the specified realm.
+        list: A list of users in the specified realm(s).
     """
-    with get_session() as session:
+    async with get_async_session() as session:
         if realm == "*":
-            q = (
-                session.query(User, Group)
+            stmt = (
+                select(User, Group)
                 .outerjoin(GroupUserLink, GroupUserLink.user_id == User.id)
                 .outerjoin(Group, Group.id == GroupUserLink.group_id)
             )
-            rows = q.all()
-
+        elif isinstance(realm, list):
+            stmt = (
+                select(User, Group)
+                .outerjoin(GroupUserLink, GroupUserLink.user_id == User.id)
+                .outerjoin(Group, Group.id == GroupUserLink.group_id)
+                .where(User.realm.in_(realm))
+            )
         else:
-            q = (
-                session.query(User, Group)
+            stmt = (
+                select(User, Group)
                 .outerjoin(GroupUserLink, GroupUserLink.user_id == User.id)
                 .outerjoin(Group, Group.id == GroupUserLink.group_id)
-                .filter(User.realm == realm)
+                .where(User.realm == realm)
             )
-            rows = q.all()
+
+        result = await session.execute(stmt)
+        rows = result.all()
 
         group_map = {}
 
+        # Pre-fetch customers for numeric usernames to avoid N+1 queries
+        numeric_usernames = {
+            row[0].username for row in rows if row[0].username.isdigit()
+        }
+        customer_name_map = {}
+        if numeric_usernames:
+            cust_result = await session.execute(
+                select(Customer.partner_id, Customer.name)
+                .where(Customer.partner_id.in_(numeric_usernames))
+            )
+            customer_rows = cust_result.all()
+            customer_name_map = {c.partner_id: c.name for c in customer_rows}
+
         for row in rows:
             user_dict = row[0].as_dict()
-            group_dict = row[1].as_dict() if row[1] else []
+            group_name = row[1].name if row[1] else ""
 
-            if user_dict["username"] == "api_user":
+            if user_dict["username"] == "api_user" or user_dict.get("deleted"):
                 continue
             elif user_dict["username"].isdigit():
-                customer = (
-                    session.query(Customer)
-                    .filter(Customer.partner_id == user_dict["username"])
-                    .first()
-                )
-
-                if customer:
-                    user_dict["username"] = "(REACH) " + customer.name
+                if user_dict["username"] in customer_name_map:
+                    user_dict["username"] = (
+                        "(REACH) " + customer_name_map[user_dict["username"]]
+                    )
 
             if user_dict["id"] in group_map:
-                group_map[user_dict["id"]]["groups"] += ", " + group_dict["name"]
+                group_map[user_dict["id"]]["groups"] += ", " + group_name
             else:
                 group_map[user_dict["id"]] = user_dict
-                group_map[user_dict["id"]]["groups"] = (
-                    group_dict["name"] if group_dict else ""
-                )
+                group_map[user_dict["id"]]["groups"] = group_name
 
         result = list(group_map.values())
 
         return result
 
 
-def user_get_quota_left(user_id: str) -> bool:
+async def user_get_quota_left(user_id: str) -> bool:
     """
     Get the transcription quota left for a user.
 
@@ -275,10 +405,11 @@ def user_get_quota_left(user_id: str) -> bool:
         bool: True if the user has quota left, False otherwise.
     """
 
-    with get_session() as session:
-        groups = (
-            session.query(Group).filter(Group.users.any(User.user_id == user_id)).all()
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(Group).where(Group.users.any(User.user_id == user_id))
         )
+        groups = result.scalars().all()
 
         if not groups:
             return True
@@ -287,7 +418,7 @@ def user_get_quota_left(user_id: str) -> bool:
             if group.quota_seconds == 0:
                 return True
 
-            group_statistics_res = group_statistics(group.id, user_id, group.realm)
+            group_statistics_res = await group_statistics(group.id, user_id, group.realm)
 
             if not group_statistics_res:
                 return True
@@ -304,7 +435,7 @@ def user_get_quota_left(user_id: str) -> bool:
     return False
 
 
-def user_update(
+async def user_update(
     user_id: str,
     transcribed_seconds: Optional[str] = "",
     active: Optional[bool] = None,
@@ -315,6 +446,8 @@ def user_update(
     reset_encryption: Optional[bool] = False,
     notifications_str: Optional[str] = None,
     email: Optional[str] = None,
+    reset_manual: Optional[bool] = False,
+    dark_mode: Optional[str] = None,
 ) -> dict:
     """
     Update a user in the database.
@@ -333,25 +466,38 @@ def user_update(
         dict: The updated user as a dictionary.
     """
 
-    with get_session() as session:
-        user = (
-            session.query(User)
-            .filter(User.user_id == user_id)
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(User)
+            .where(User.user_id == user_id)
             .with_for_update()
-            .first()
         )
+        user = result.scalars().first()
 
         if not user:
             return {}
 
-        user.last_login = datetime.utcnow()
+        user.last_login = datetime.now(UTC).replace(tzinfo=None)
 
         if transcribed_seconds:
             user.transcribed_seconds += float(transcribed_seconds)
 
+        if reset_manual:
+            log.info(f"Resetting manual override flags for user {user.user_id}")
+            user.manually_activated = False
+            user.manually_deactivated = False
+
         if active is not None:
             log.info(f"Setting user {user.user_id} active status to {active}")
             user.active = active
+
+            # Track manual activation/deactivation so auto-provisioning rules don't override it
+            if not active:
+                user.manually_deactivated = True
+                user.manually_activated = False
+            else:
+                user.manually_deactivated = False
+                user.manually_activated = True
 
             if (
                 user.email != ""
@@ -403,10 +549,15 @@ def user_update(
             user.public_key = None
 
             # Remove all files encrypted with the previous key
-            jobs = session.query(Job).filter(Job.user_id == user.user_id).all()
+            job_result = await session.execute(
+                select(Job).where(Job.user_id == user.user_id)
+            )
+            jobs = job_result.scalars().all()
 
             for job in jobs:
-                job_remove(job.uuid)
+                from db.job import job_remove
+
+                await job_remove(job.uuid)
 
         if email:
             log.info(f"Updating email for user {user.user_id} to {email}")
@@ -421,6 +572,9 @@ def user_update(
             )
             user.notifications = notifications_str
 
+        if dark_mode is not None:
+            user.dark_mode = dark_mode
+
         log.info(
             f"User {user.user_id} updated: "
             + f"transcribed_seconds={user.transcribed_seconds}, "
@@ -430,7 +584,7 @@ def user_update(
         return user.as_dict() if user else {}
 
 
-def user_get_email(user_id: str) -> Optional[str]:
+async def user_get_email(user_id: str) -> Optional[str]:
     """
     Get a user's email by user_id.
 
@@ -441,13 +595,16 @@ def user_get_email(user_id: str) -> Optional[str]:
         Optional[str]: The email associated with the user_id, or None if not found.
     """
 
-    with get_session() as session:
-        user = session.query(User).filter(User.user_id == user_id).first()
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(User).where(User.user_id == user_id)
+        )
+        user = result.scalars().first()
 
         return user.email if user else None
 
 
-def get_username_from_id(user_id: str) -> Optional[str]:
+async def get_username_from_id(user_id: str) -> Optional[str]:
     """
     Get a username by user_id.
 
@@ -458,13 +615,16 @@ def get_username_from_id(user_id: str) -> Optional[str]:
         Optional[str]: The username associated with the user_id, or None if not found.
     """
 
-    with get_session() as session:
-        user = session.query(User).filter(User.user_id == user_id).first()
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(User).where(User.user_id == user_id)
+        )
+        user = result.scalars().first()
 
     return user.username if user else None
 
 
-def users_statistics(
+async def users_statistics(
     group_id: Optional[str] = "",
     realm: Optional[str] = "",
     days: Optional[int] = 30,
@@ -484,22 +644,52 @@ def users_statistics(
         dict: A dictionary containing user statistics.
     """
 
-    with get_session() as session:
-        user = session.query(User).filter(User.user_id == user_id).first()
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(User).where(User.user_id == user_id)
+        )
+        user = result.scalars().first()
         user_domains = (
-            user.admin_domains.split(",") if user and user.admin_domains else []
+            [d.strip() for d in user.admin_domains.split(",")]
+            if user and user.admin_domains
+            else []
         )
 
-        if group_id == "0":
+        if group_id == 0:
             if realm == "*":
-                users = session.query(User).all()
+                users_result = await session.execute(select(User))
+                users = users_result.scalars().all()
             else:
-                users = session.query(User).filter(User.realm.in_(user_domains)).all()
+                users_result = await session.execute(
+                    select(User).where(User.realm.in_(user_domains))
+                )
+                users = users_result.scalars().all()
         else:
             if realm == "*":
-                group = session.query(Group).filter(Group.id == group_id).first()
+                group_result = await session.execute(
+                    select(Group).where(Group.id == group_id)
+                )
+                group = group_result.scalars().first()
             else:
-                group = session.query(Group).filter(Group.id == group_id).first()
+                if not user_domains:
+                    return {
+                        "total_users": 0,
+                        "active_users": [],
+                        "transcribed_files": 0,
+                        "transcribed_files_last_month": 0,
+                        "total_transcribed_minutes": 0,
+                        "total_transcribed_minutes_last_month": 0,
+                        "transcribed_minutes_per_day": {},
+                        "transcribed_minutes_per_day_previous_month": {},
+                        "transcribed_minutes_per_user": {},
+                        "job_queue": {},
+                    }
+                group_result = await session.execute(
+                    select(Group)
+                    .where(Group.id == group_id)
+                    .where(Group.realm.in_(user_domains))
+                )
+                group = group_result.scalars().first()
 
             if not group:
                 return {
@@ -515,7 +705,13 @@ def users_statistics(
                     "job_queue": {},
                 }
 
-            users = group.users
+            # Need to load users via join since group.users would lazy-load
+            link_result = await session.execute(
+                select(User)
+                .join(GroupUserLink, GroupUserLink.user_id == User.id)
+                .where(GroupUserLink.group_id == group.id)
+            )
+            users = link_result.scalars().all()
 
         total_transcribed_minutes = 0
         total_transcribed_minutes_last_month = 0
@@ -531,7 +727,7 @@ def users_statistics(
 
         job_queue = []
 
-        today = datetime.utcnow().date()
+        today = datetime.now(UTC).date()
         last_day = calendar.monthrange(today.year, today.month)[1]
         last_date_string = f"{today.year}-{today.month:02d}-{last_day}"
         last_date = datetime.fromisoformat(last_date_string).date()
@@ -556,100 +752,132 @@ def users_statistics(
         transcribed_minutes_per_day = {d: 0 for d in date_range}
         transcribed_minutes_per_day_last_month = {d: 0 for d in date_range_prev_month}
 
-        for user in users:
-            jobs = job_get_all(user.user_id, cleaned=True)["jobs"]
+        # Batch-fetch all jobs for the relevant time window instead of N+1 per user
+        user_ids = [user.user_id for user in users]
+        if user_ids:
+            jobs_result = await session.execute(
+                select(Job)
+                .where(
+                    Job.user_id.in_(user_ids),
+                    Job.job_type == JobType.TRANSCRIPTION,
+                    Job.created_at >= first_day_prev_month,
+                )
+            )
+            all_jobs = jobs_result.scalars().all()
+        else:
+            all_jobs = []
 
-            if not jobs:
+        # Build a mapping of user_id -> jobs
+        jobs_by_user = {}
+        for job in all_jobs:
+            jobs_by_user.setdefault(job.user_id, []).append(job)
+
+        # Pre-fetch customer names for numeric usernames
+        numeric_usernames = {u.username for u in users if u.username.isdigit()}
+        customer_name_map = {}
+        if numeric_usernames:
+            cust_result = await session.execute(
+                select(Customer.partner_id, Customer.name)
+                .where(Customer.partner_id.in_(numeric_usernames))
+            )
+            customer_rows = cust_result.all()
+            customer_name_map = {c.partner_id: c.name for c in customer_rows}
+
+        for user in users:
+            user_jobs = jobs_by_user.get(user.user_id, [])
+
+            if not user_jobs:
                 continue
 
             if user.username.isdigit():
-                customer = (
-                    session.query(Customer)
-                    .filter(Customer.partner_id == user.username)
-                    .first()
+                display_name = "(REACH) " + customer_name_map.get(
+                    user.username, user.username
                 )
-                if customer:
-                    display_name = "(REACH) " + customer.name
-                else:
-                    display_name = user.username
             else:
                 display_name = user.username
 
-            for job in jobs:
-                job_date = datetime.strptime(
-                    job["created_at"], "%Y-%m-%d %H:%M:%S.%f"
-                ).date()
-
+            for job in user_jobs:
+                job_date = job.created_at.date()
                 job_date_str = job_date.isoformat()
 
                 if job_date >= first_day_this_month:
-                    if job["status"] == "completed" or job["status"] == "deleted":
+                    if job.status in (JobStatusEnum.COMPLETED, JobStatusEnum.DELETED):
                         transcribed_files += 1
-                        total_transcribed_minutes += job["transcribed_seconds"] / 60
+                        total_transcribed_minutes += job.transcribed_seconds / 60
 
-                        transcribed_minutes_per_day[job_date_str] += (
-                            job["transcribed_seconds"] / 60
-                        )
+                        if job_date_str in transcribed_minutes_per_day:
+                            transcribed_minutes_per_day[job_date_str] += (
+                                job.transcribed_seconds / 60
+                            )
 
                         if display_name not in transcribed_minutes_per_user:
                             transcribed_minutes_per_user[display_name] = 0
 
                         transcribed_minutes_per_user[display_name] += (
-                            job["transcribed_seconds"] / 60
+                            job.transcribed_seconds / 60
                         )
 
-                    if job["status"] == "uploaded" or job["status"] == "in_progress":
-                        if job["status"] == "in_progress":
-                            status = "transcribing"
-                        else:
-                            status = job["status"]
+                    if job.status in (
+                        JobStatusEnum.UPLOADED,
+                        JobStatusEnum.IN_PROGRESS,
+                    ):
+                        status = (
+                            "transcribing"
+                            if job.status == JobStatusEnum.IN_PROGRESS
+                            else job.status.value
+                        )
 
                         job_data = {
                             "status": status,
-                            "created_at": job["created_at"],
-                            "updated_at": job["updated_at"],
-                            "job_id": job["uuid"],
-                            "username": display_name,  # Use display name
+                            "created_at": str(job.created_at),
+                            "updated_at": str(job.updated_at),
+                            "job_id": job.uuid,
+                            "username": display_name,
                         }
 
                         job_queue.append(job_data)
                 elif first_day_prev_month <= job_date <= last_day_prev_month:
-                    if job["status"] == "completed" or job["status"] == "deleted":
+                    if job.status in (JobStatusEnum.COMPLETED, JobStatusEnum.DELETED):
                         transcribed_files_last_month += 1
 
                         total_transcribed_minutes_last_month += (
-                            job["transcribed_seconds"] / 60
+                            job.transcribed_seconds / 60
                         )
 
-                        transcribed_minutes_per_day_last_month[job_date_str] += (
-                            job["transcribed_seconds"] / 60
-                        )
+                        if job_date_str in transcribed_minutes_per_day_last_month:
+                            transcribed_minutes_per_day_last_month[job_date_str] += (
+                                job.transcribed_seconds / 60
+                            )
 
                         if display_name not in transcribed_minutes_per_user_last_month:
                             transcribed_minutes_per_user_last_month[display_name] = 0
 
                         transcribed_minutes_per_user_last_month[display_name] += (
-                            job["transcribed_seconds"] / 60
+                            job.transcribed_seconds / 60
                         )
 
-                    if job["status"] == "uploaded" or job["status"] == "in_progress":
-                        if job["status"] == "in_progress":
-                            status = "transcribing"
-                        else:
-                            status = job["status"]
+                    if job.status in (
+                        JobStatusEnum.UPLOADED,
+                        JobStatusEnum.IN_PROGRESS,
+                    ):
+                        status = (
+                            "transcribing"
+                            if job.status == JobStatusEnum.IN_PROGRESS
+                            else job.status.value
+                        )
 
                         job_data = {
                             "status": status,
-                            "created_at": job["created_at"],
-                            "updated_at": job["updated_at"],
-                            "job_id": job["uuid"],
-                            "username": display_name,  # Use display name
+                            "created_at": str(job.created_at),
+                            "updated_at": str(job.updated_at),
+                            "job_id": job.uuid,
+                            "username": display_name,
                         }
 
                         job_queue.append(job_data)
                 else:
                     log.debug(
-                        f"Skipping job {job['uuid']} for user {user.username}"
+                        f"Skipping job {job.uuid} for user {user.user_id}"
                         + f" with date {job_date_str}"
                     )
 
@@ -670,7 +898,7 @@ def users_statistics(
         }
 
 
-def group_statistics(group_id: str, user_id: str, realm: str) -> dict:
+async def group_statistics(group_id: int, user_id: str, realm: str) -> dict:
     """
     Get group statistics for a user.
 
@@ -683,7 +911,7 @@ def group_statistics(group_id: str, user_id: str, realm: str) -> dict:
         dict: A dictionary containing group statistics.
     """
 
-    stats = users_statistics(group_id=group_id, user_id=user_id, realm=realm)
+    stats = await users_statistics(group_id=group_id, user_id=user_id, realm=realm)
 
     condensed_stats = {
         "total_users": stats["total_users"],
@@ -698,7 +926,7 @@ def group_statistics(group_id: str, user_id: str, realm: str) -> dict:
     return condensed_stats
 
 
-def user_can_transcribe(user_id: str) -> int:
+async def user_can_transcribe(user_id: str) -> int:
     """
     Check which group a user belongs to and check whether the user have
     quota left or not.
@@ -713,28 +941,33 @@ def user_can_transcribe(user_id: str) -> int:
             >0 indicating the number of seconds left in the quota.
     """
 
-    with get_session() as session:
-        if not (user := session.query(User).filter(User.user_id == user_id).first()):
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(User).where(User.user_id == user_id)
+        )
+        user = result.scalars().first()
+        if not user:
             return 0
 
-        groups = (
-            session.query(Group).filter(Group.users.any(User.user_id == user_id)).all()
+        result = await session.execute(
+            select(Group).where(Group.users.any(User.user_id == user_id))
         )
+        groups = result.scalars().all()
 
         if not groups:
             return -1
 
         for group in groups:
-            if group.transcription_quota == 0:
+            if group.quota_seconds == 0:
                 return -1  # Unlimited quota
 
-            if user.transcribed_seconds < group.transcription_quota:
-                return group.transcription_quota - user.transcribed_seconds
+            if user.transcribed_seconds < group.quota_seconds:
+                return group.quota_seconds - user.transcribed_seconds
 
         return 0
 
 
-def user_get_notifications(user_id: str, notification: str) -> Optional[str]:
+async def user_get_notifications(user_id: str, notification: str) -> Optional[str]:
     """
     Get a user's notification settings by user_id.
 
@@ -746,8 +979,11 @@ def user_get_notifications(user_id: str, notification: str) -> Optional[str]:
         setting is enabled, or None if not found.
     """
 
-    with get_session() as session:
-        user = session.query(User).filter(User.user_id == user_id).first()
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(User).where(User.user_id == user_id)
+        )
+        user = result.scalars().first()
 
         if not user.notifications:
             return None
@@ -758,9 +994,9 @@ def user_get_notifications(user_id: str, notification: str) -> Optional[str]:
         return None
 
 
-def users_admin_domains_from_realm(realm: str) -> list:
+async def users_admin_domains_from_realm(realm: str) -> list:
     """
-    Get all users which have the ralm in their list of admin_domains.
+    Get all users which have the realm in their list of admin_domains.
 
     Parameters:
         realm (str): The realm/domain to filter users by.
@@ -769,7 +1005,12 @@ def users_admin_domains_from_realm(realm: str) -> list:
         list: A list of users which have the realm in their admin_domains.
     """
 
-    with get_session() as session:
-        users = session.query(User).filter(User.admin_domains.ilike(realm)).all()
+    async with get_async_session() as session:
+        result = await session.execute(
+            select(User).where(
+                User.admin_domains.ilike(realm), User.deleted == False  # noqa: E712
+            )
+        )
+        users = result.scalars().all()
 
         return [user.as_dict() for user in users]

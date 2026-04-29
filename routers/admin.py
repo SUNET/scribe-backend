@@ -1,6 +1,25 @@
+# Copyright (c) 2025-2026 Sunet.
+# Contributor: Kristofer Hallin
+#
+# This file is part of Sunet Scribe.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import JSONResponse
 from db.user import (
+    user_delete,
     user_get,
     users_statistics,
     user_get_all,
@@ -16,23 +35,7 @@ from db.group import (
     group_add_user,
     group_remove_user,
 )
-from db.customer import (
-    customer_create,
-    customer_get,
-    customer_get_all,
-    customer_update,
-    customer_delete,
-    customer_get_statistics,
-    get_all_realms,
-    export_customers_to_csv,
-)
 
-from db.rules import (
-    rule_add,
-    rule_update,
-    rule_delete,
-    rules_get_all,
-)
 from utils.log import get_logger
 
 from utils.settings import get_settings
@@ -45,14 +48,34 @@ from utils.validators import (
     ModifyUserRequest,
     CreateGroupRequest,
     UpdateGroupRequest,
-    CreateCustomerRequest,
-    UpdateCustomerRequest,
-    RuleAddRequest,
 )
 
 log = get_logger()
 router = APIRouter(tags=["admin"])
 settings = get_settings()
+
+
+def _get_admin_allowed_realms(admin_user: dict) -> list[str]:
+    """
+    Return the list of realms a non-BOFH admin may manage.
+
+    Parameters:
+        admin_user (dict): The admin user dict.
+
+    Returns:
+        list[str]: The list of allowed realms.
+    """
+
+    realms = set()
+
+    if admin_user.get("realm"):
+        realms.add(admin_user["realm"])
+
+    for d in (admin_user.get("admin_domains") or "").split(","):
+        d = d.strip()
+        if d:
+            realms.add(d)
+    return sorted(realms)
 
 
 @router.get("/admin")
@@ -75,9 +98,11 @@ async def statistics(
     if admin_user["bofh"]:
         realm = "*"
     else:
-        realm = admin_user["realm"]
+        admin_domains = admin_user.get("admin_domains", "") or ""
+        realms = [d.strip() for d in admin_domains.split(",") if d.strip()]
+        realm = realms if realms else [admin_user["realm"]]
 
-    return JSONResponse(content={"result": users_statistics(realm=realm)})
+    return JSONResponse(content={"result": await users_statistics(realm=realm)})
 
 
 @router.get("/admin/users")
@@ -98,11 +123,14 @@ async def list_users(
     """
 
     if admin_user["bofh"]:
-        realm = "*"
+        realms = "*"
     else:
-        realm = admin_user["realm"]
+        admin_domains = admin_user.get("admin_domains", "") or ""
+        realms = [d.strip() for d in admin_domains.split(",") if d.strip()]
+        if not realms:
+            realms = [admin_user["realm"]]
 
-    return JSONResponse(content={"result": user_get_all(realm=realm)})
+    return JSONResponse(content={"result": await user_get_all(realm=realms)})
 
 
 @router.put("/admin/{username}")
@@ -124,28 +152,99 @@ async def modify_user(
     Returns:
         JSONResponse: The result of the operation.
     """
-    if not (user_id := user_get(username=username)["user_id"]):
+    target_user = await user_get(username=username)
+    if not target_user or not target_user.get("user_id"):
         return JSONResponse(
             content={"error": "User not found"},
             status_code=404,
         )
 
+    if not admin_user["bofh"]:
+        admin_domains = admin_user.get("admin_domains", "") or ""
+        allowed_realms = [d.strip() for d in admin_domains.split(",") if d.strip()]
+        if not allowed_realms:
+            allowed_realms = [admin_user["realm"]]
+        if target_user.get("realm") not in allowed_realms:
+            log.warning(
+                f"Admin {admin_user['user_id']} denied modify access to user (realm mismatch)"
+            )
+            return JSONResponse(
+                content={"error": "Not authorized to modify this user"},
+                status_code=403,
+            )
+
+    user_id = target_user["user_id"]
+
     if item.active is not None:
-        user_update(
+        await user_update(
             user_id,
             active=item.active,
         )
 
     if item.admin is not None:
-        user_update(
+        await user_update(
             user_id,
             admin=item.admin,
         )
 
     if item.admin_domains is not None:
-        user_update(
+        await user_update(
             user_id,
             admin_domains=item.admin_domains,
+        )
+
+    if item.reset_manual:
+        await user_update(
+            user_id,
+            reset_manual=True,
+        )
+
+    return JSONResponse(content={"result": {"status": "OK"}})
+
+
+@router.delete("/admin/{username}")
+async def delete_user(
+    request: Request,
+    username: str,
+    admin_user: dict = Depends(get_current_admin_user),
+) -> JSONResponse:
+    """
+    Soft-delete a user. The user is marked as deleted and will be
+    permanently removed once all associated job data has been cleaned up.
+
+    Parameters:
+        request (Request): The incoming HTTP request.
+        username (str): The username of the user to delete.
+        admin_user (dict): The current user.
+
+    Returns:
+        JSONResponse: The result of the operation.
+    """
+
+    if not admin_user["bofh"]:
+        target_user = await user_get(username=username)
+        if not target_user or not target_user.get("user_id"):
+            return JSONResponse(
+                content={"error": "User not found"},
+                status_code=404,
+            )
+        admin_domains = admin_user.get("admin_domains", "") or ""
+        allowed_realms = [d.strip() for d in admin_domains.split(",") if d.strip()]
+        if not allowed_realms:
+            allowed_realms = [admin_user["realm"]]
+        if target_user.get("realm") not in allowed_realms:
+            log.warning(
+                f"Admin {admin_user['user_id']} denied delete access to user (realm mismatch)"
+            )
+            return JSONResponse(
+                content={"error": "Not authorized to delete this user"},
+                status_code=403,
+            )
+
+    if not await user_delete(username):
+        return JSONResponse(
+            content={"error": "User not found"},
+            status_code=404,
         )
 
     return JSONResponse(content={"result": {"status": "OK"}})
@@ -172,11 +271,11 @@ async def list_groups(
     else:
         realm = admin_user["realm"]
 
-    groups = group_get_all(admin_user["user_id"], realm=realm)
+    groups = await group_get_all(admin_user["user_id"], realm=realm)
     result = []
 
     for g in groups:
-        stats = group_statistics(str(g["id"]), admin_user["user_id"], realm)
+        stats = await group_statistics(g["id"], admin_user["user_id"], realm)
 
         if g["name"] == "All users":
             g["nr_users"] = stats["total_users"]
@@ -219,7 +318,7 @@ async def create_group(
     if not item.name:
         return JSONResponse(content={"error": "Missing group name"}, status_code=400)
 
-    group = group_create(
+    group = await group_create(
         name=item.name,
         realm=admin_user["realm"],
         description=item.description,
@@ -238,8 +337,8 @@ async def create_group(
 @router.get("/admin/groups/{group_id}")
 async def get_group(
     request: Request,
-    group_id: str,
-    admin_user: dict = Depends(get_current_user),
+    group_id: int,
+    admin_user: dict = Depends(get_current_admin_user),
 ) -> JSONResponse:
     """
     Get group details.
@@ -258,7 +357,7 @@ async def get_group(
     else:
         realm = admin_user["realm"]
 
-    group = group_get(group_id, realm=realm, user_id=admin_user["user_id"])
+    group = await group_get(group_id, realm=realm, user_id=admin_user["user_id"])
 
     if not group:
         return JSONResponse(content={"error": "Group not found"}, status_code=404)
@@ -270,7 +369,7 @@ async def get_group(
 async def update_group(
     request: Request,
     item: UpdateGroupRequest,
-    group_id: str,
+    group_id: int,
     admin_user: dict = Depends(get_current_admin_user),
 ) -> JSONResponse:
     """
@@ -278,15 +377,24 @@ async def update_group(
 
     Parameters:
         request (Request): The incoming HTTP request.
-        group_id (str): The ID of the group.
+        group_id (int): The ID of the group.
         admin_user (dict): The current user.
 
     Returns:
         JSONResponse: The result of the operation.
     """
 
+    if admin_user["bofh"]:
+        realm = "*"
+    else:
+        realm = admin_user["realm"]
+
+    group = await group_get(group_id, realm=realm, user_id=admin_user["user_id"])
+    if not group:
+        return JSONResponse(content={"error": "Group not found"}, status_code=404)
+
     try:
-        if not group_update(
+        if not await group_update(
             group_id,
             name=item.name,
             description=item.description,
@@ -318,7 +426,16 @@ async def delete_group(
         JSONResponse: The result of the operation.
     """
 
-    if not group_delete(group_id):
+    if admin_user["bofh"]:
+        realm = "*"
+    else:
+        realm = admin_user["realm"]
+
+    group = await group_get(group_id, realm=realm, user_id=admin_user["user_id"])
+    if not group:
+        return JSONResponse(content={"error": "Group not found"}, status_code=404)
+
+    if not await group_delete(group_id):
         return JSONResponse(content={"error": "Group not found"}, status_code=404)
 
     return JSONResponse(content={"result": {"status": "OK"}})
@@ -344,7 +461,16 @@ async def add_user_to_group(
         JSONResponse: The result of the operation.
     """
 
-    if not group_add_user(group_id, username):
+    if admin_user["bofh"]:
+        realm = "*"
+    else:
+        realm = admin_user["realm"]
+
+    group = await group_get(group_id, realm=realm, user_id=admin_user["user_id"])
+    if not group:
+        return JSONResponse(content={"error": "Group not found"}, status_code=404)
+
+    if not await group_add_user(group_id, username):
         return JSONResponse(
             content={"error": "User or group not found"}, status_code=404
         )
@@ -372,7 +498,16 @@ async def remove_user_from_group(
         JSONResponse: The result of the operation.
     """
 
-    if not group_remove_user(group_id, username):
+    if admin_user["bofh"]:
+        realm = "*"
+    else:
+        realm = admin_user["realm"]
+
+    group = await group_get(group_id, realm=realm, user_id=admin_user["user_id"])
+    if not group:
+        return JSONResponse(content={"error": "Group not found"}, status_code=404)
+
+    if not await group_remove_user(group_id, username):
         return JSONResponse(
             content={"error": "User or group not found"}, status_code=404
         )
@@ -383,7 +518,7 @@ async def remove_user_from_group(
 @router.get("/admin/groups/{group_id}/stats")
 async def group_stats(
     request: Request,
-    group_id: str,
+    group_id: int,
     admin_user: dict = Depends(get_current_admin_user),
 ) -> JSONResponse:
     """
@@ -391,7 +526,7 @@ async def group_stats(
 
     Parameters:
         request (Request): The incoming HTTP request.
-        group_id (str): The ID of the group.
+        group_id (int): The ID of the group.
         admin_user (dict): The current user.
 
     Returns:
@@ -403,389 +538,15 @@ async def group_stats(
     else:
         realm = admin_user["realm"]
 
-    group = group_get(group_id, realm=realm, user_id=admin_user["user_id"])
+    group = await group_get(group_id, realm=realm, user_id=admin_user["user_id"])
 
     if not group:
         return JSONResponse(content={"error": "Group not found"}, status_code=404)
 
     return JSONResponse(
         content={
-            "result": users_statistics(
+            "result": await users_statistics(
                 group_id, realm=realm, user_id=admin_user["user_id"]
             )
         }
     )
-
-
-@router.get("/admin/customers", include_in_schema=False)
-async def list_customers(
-    request: Request,
-    admin_user: dict = Depends(get_current_admin_user),
-) -> JSONResponse:
-    """
-    List all customers with statistics.
-
-    Parameters:
-        request (Request): The incoming HTTP request.
-        admin_user (dict): The current user.
-
-    Returns:
-        JSONResponse: The list of customers with statistics.
-    """
-
-    customers = customer_get_all(admin_user)
-
-    result = []
-
-    for customer in customers:
-        stats = customer_get_statistics(customer["id"])
-        customer["stats"] = stats
-        result.append(customer)
-
-    return JSONResponse(content={"result": result})
-
-
-@router.post("/admin/customers", include_in_schema=False)
-async def create_customer(
-    request: Request,
-    item: CreateCustomerRequest,
-    admin_user: dict = Depends(get_current_admin_user),
-) -> JSONResponse:
-    """
-    Create a new customer.
-
-    Parameters:
-        request (Request): The incoming HTTP request.
-        admin_user (dict): The current user.
-
-    Returns:
-        JSONResponse: The result of the operation.
-    """
-
-    if not admin_user["bofh"]:
-        return JSONResponse(content={"error": "User not authorized"}, status_code=403)
-
-    if not item.partner_id or not item.name:
-        return JSONResponse(
-            content={"error": "Missing required fields"}, status_code=400
-        )
-
-    customer = customer_create(
-        customer_abbr=item.customer_abbr,
-        partner_id=item.partner_id,
-        name=item.name,
-        priceplan=item.priceplan,
-        base_fee=item.base_fee,
-        realms=item.realms,
-        contact_email=item.contact_email,
-        notes=item.notes,
-        blocks_purchased=item.blocks_purchased,
-    )
-
-    return JSONResponse(content={"result": customer})
-
-
-@router.get("/admin/customers/{customer_id}", include_in_schema=False)
-async def get_customer(
-    request: Request,
-    customer_id: str,
-    admin_user: dict = Depends(get_current_admin_user),
-) -> JSONResponse:
-    """
-    Get customer details.
-
-    Parameters:
-        request (Request): The incoming HTTP request.
-        customer_id (str): The ID of the customer.
-        admin_user (dict): The current user.
-
-    Returns:
-        JSONResponse: The customer details.
-    """
-
-    if not (customer := customer_get(customer_id)):
-        return JSONResponse(content={"error": "Customer not found"}, status_code=404)
-
-    return JSONResponse(content={"result": customer})
-
-
-@router.put("/admin/customers/{customer_id}", include_in_schema=False)
-async def update_customer(
-    request: Request,
-    item: UpdateCustomerRequest,
-    customer_id: str,
-    admin_user: dict = Depends(get_current_admin_user),
-) -> JSONResponse:
-    """
-    Update customer details.
-
-    Parameters:
-        request (Request): The incoming HTTP request.
-        customer_id (str): The ID of the customer.
-        admin_user (dict): The current user.
-
-    Returns:
-        JSONResponse: The updated customer details.
-    """
-
-    if not admin_user["bofh"]:
-        return JSONResponse(content={"error": "User not authorized"}, status_code=403)
-
-    customer = customer_update(
-        customer_id,
-        customer_abbr=item.customer_abbr,
-        partner_id=item.partner_id,
-        name=item.name,
-        priceplan=item.priceplan,
-        base_fee=item.base_fee,
-        realms=item.realms,
-        contact_email=item.contact_email,
-        notes=item.notes,
-        blocks_purchased=item.blocks_purchased,
-    )
-
-    if not customer:
-        return JSONResponse(content={"error": "Customer not found"}, status_code=404)
-
-    return JSONResponse(content={"result": customer})
-
-
-@router.delete("/admin/customers/{customer_id}", include_in_schema=False)
-async def delete_customer(
-    request: Request,
-    customer_id: int,
-    admin_user: dict = Depends(get_current_admin_user),
-) -> JSONResponse:
-    """
-    Delete a customer.
-
-    Parameters:
-        request (Request): The incoming HTTP request.
-        customer_id (int): The ID of the customer.
-        admin_user (dict): The current user.
-
-    Returns:
-        JSONResponse: The result of the operation.
-    """
-
-    if not admin_user["bofh"]:
-        return JSONResponse(content={"error": "User not authorized"}, status_code=403)
-
-    if not customer_delete(customer_id):
-        return JSONResponse(content={"error": "Customer not found"}, status_code=404)
-
-    return JSONResponse(content={"result": {"status": "OK"}})
-
-
-@router.get("/admin/realms", include_in_schema=False)
-async def list_realms(
-    request: Request,
-    admin_user: dict = Depends(get_current_admin_user),
-) -> JSONResponse:
-    """
-    List all unique realms.
-
-    Parameters:
-        request (Request): The incoming HTTP request.
-        admin_user (dict): The current user.
-
-    Returns:
-        JSONResponse: The list of unique realms.
-    """
-
-    if not admin_user["bofh"]:
-        return JSONResponse(content={"error": "User not authorized"}, status_code=403)
-
-    return JSONResponse(content={"result": get_all_realms()})
-
-
-@router.get("/admin/customers/{customer_id}/stats", include_in_schema=False)
-async def customer_stats(
-    request: Request,
-    customer_id: str,
-    admin_user: dict = Depends(get_current_admin_user),
-) -> JSONResponse:
-    """
-    Get detailed customer statistics.
-
-    Parameters:
-        request (Request): The incoming HTTP request.
-        customer_id (str): The ID of the customer.
-        admin_user (dict): The current user.
-
-    Returns:
-        JSONResponse: The customer statistics.
-    """
-
-    if not admin_user["bofh"] and not admin_user["admin"]:
-        return JSONResponse(content={"error": "User not authorized"}, status_code=403)
-
-    if not customer_get(customer_id):
-        return JSONResponse(content={"error": "Customer not found"}, status_code=404)
-
-    return JSONResponse(content={"result": customer_get_statistics(customer_id)})
-
-
-@router.get("/admin/customers/export/csv")
-async def export_customers_csv(
-    request: Request,
-    admin_user: dict = Depends(get_current_admin_user),
-):
-    """
-    Export all customers with statistics to CSV format.
-
-    Parameters:
-        request (Request): The incoming HTTP request.
-        admin_user (dict): The current user.
-
-    Returns:
-        Response: The CSV file response.
-    """
-
-    if not admin_user["bofh"] and not admin_user["admin"]:
-        return JSONResponse(content={"error": "User not authorized"}, status_code=403)
-
-    if not (csv_data := export_customers_to_csv(admin_user).encode("utf-8")):
-        return JSONResponse(
-            content={"error": "No customer data to export"}, status_code=404
-        )
-
-    return Response(
-        content=csv_data,
-        media_type="text/csv",
-        headers={"Content-Disposition": 'attachment; filename="customers_export.csv"'},
-    )
-
-
-@router.get("/admin/onboarding/rules")
-def get_onboarding_rules(
-    request: Request,
-    admin_user: dict = Depends(get_current_admin_user),
-) -> JSONResponse:
-    """
-    Get onboarding rules.
-    Used by the frontend to get onboarding rules.
-
-    Parameters:
-        request (Request): The incoming HTTP request.
-        admin_user (dict): The current user.
-
-    Returns:
-        JSONResponse: The onboarding rules.
-    """
-
-    return JSONResponse(content={"result": rules_get_all()})
-
-
-@router.post("/admin/onboarding/rules")
-def set_onboarding_rules(
-    request: Request,
-    item: RuleAddRequest,
-    admin_user: dict = Depends(get_current_admin_user),
-) -> JSONResponse:
-    """
-    Set onboarding rules.
-    Used by the frontend to set onboarding rules.
-
-    Parameters:
-        request (Request): The incoming HTTP request.
-        admin_user (dict): The current user.
-
-    Returns:
-        JSONResponse: The result of the operation.
-    """
-
-    rule = rule_add(
-        name=item.name,
-        attribute_name=item.attribute_name,
-        attribute_condition=item.attribute_condition,
-        attribute_value=item.attribute_value,
-        activate=item.activate,
-        admin=item.admin,
-        assign_to_group=item.assign_to_group,
-        assign_to_admin_domains=item.assign_to_admin_domains,
-        realm_filter=item.realm_filter,
-    )
-
-    return JSONResponse(content={"result": rule})
-
-
-@router.put("/admin/onboarding/rule/{rule_id}")
-def update_onboarding_rules(
-    request: Request,
-    rule_id: str,
-    item: RuleAddRequest,
-    admin_user: dict = Depends(get_current_admin_user),
-) -> JSONResponse:
-    """
-    Update onboarding rules.
-    Used by the frontend to update onboarding rules.
-
-    Parameters:
-        request (Request): The incoming HTTP request.
-        admin_user (dict): The current user.
-
-    Returns:
-        JSONResponse: The result of the operation.
-    """
-
-    print(item)
-
-    rule = rule_update(
-        rule_id=rule_id,
-        name=item.name,
-        attribute_name=item.attribute_name,
-        attribute_condition=item.attribute_condition,
-        attribute_value=item.attribute_value,
-        activate=item.activate,
-        admin=item.admin,
-        assign_to_group=item.assign_to_group,
-        assign_to_admin_domains=item.assign_to_admin_domains,
-        realm_filter=item.realm_filter,
-    )
-
-    return JSONResponse(content={"result": rule})
-
-
-@router.delete("/admin/onboarding/rule/{rule_id}")
-def delete_onboarding_rules(
-    request: Request,
-    rule_id: str,
-    admin_user: dict = Depends(get_current_admin_user),
-) -> JSONResponse:
-    """
-    Delete onboarding rules.
-    Used by the frontend to delete onboarding rules.
-
-    Parameters:
-        request (Request): The incoming HTTP request.
-        admin_user (dict): The current user.
-
-    Returns:
-        JSONResponse: The result of the operation.
-    """
-
-    if not rule_delete(rule_id):
-        return JSONResponse(content={"error": "Rule not found"}, status_code=404)
-
-    return JSONResponse(content={"result": {"status": "OK"}})
-
-
-@router.post("/admin/onboarding/rules/test")
-def test_onboarding_rules(
-    request: Request,
-    admin_user: dict = Depends(get_current_admin_user),
-) -> JSONResponse:
-    """
-    Test onboarding rules.
-    Used by the frontend to test onboarding rules.
-
-    Parameters:
-        request (Request): The incoming HTTP request.
-        admin_user (dict): The current user.
-
-    Returns:
-        JSONResponse: The result of the operation.
-    """
-
-    return JSONResponse(content={"result": rules_get_all()})

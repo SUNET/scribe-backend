@@ -1,3 +1,20 @@
+# Copyright (c) 2025-2026 Sunet.
+# Contributor: Kristofer Hallin
+#
+# This file is part of Sunet Scribe.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from auth.oidc import get_current_user
 from db.job import job_get
 from db.user import user_get_private_key
@@ -38,10 +55,10 @@ async def get_video_stream(
         StreamingResponse: The video stream response.
     """
 
-    job = job_get(job_id, user["user_id"])
+    job = await job_get(job_id, user["user_id"])
 
     if item.encryption_password != "" and item.encryption_password is not None:
-        private_key = user_get_private_key(user["user_id"])
+        private_key = await user_get_private_key(user["user_id"])
         private_key = deserialize_private_key_from_pem(
             private_key, item.encryption_password
         )

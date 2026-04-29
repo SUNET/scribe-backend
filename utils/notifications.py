@@ -1,7 +1,25 @@
+# Copyright (c) 2025-2026 Sunet.
+# Contributor: Kristofer Hallin
+#
+# This file is part of Sunet Scribe.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import collections
 import smtplib
 import ssl
 import threading
+from email.message import EmailMessage
 
 from db.models import NotificationsSent
 from db.session import get_session
@@ -93,11 +111,15 @@ class Notifications:
             server.login(settings.API_SMTP_USERNAME, settings.API_SMTP_PASSWORD)
 
             for email in to_emails:
-                mail_to_send = f"From: Sunet Scribe <{settings.API_SMTP_SENDER}>\nTo: {email}\nSubject: {subject}\n\n{message}"
-                server.sendmail(settings.API_SMTP_SENDER, to_emails, mail_to_send)
-                logger.info(f"Email sent to {', '.join(to_emails)}")
+                msg = EmailMessage()
+                msg["From"] = f"{settings.BRANDING_NAME} <{settings.API_SMTP_SENDER}>"
+                msg["To"] = email
+                msg["Subject"] = subject
+                msg.set_content(message)
+                server.sendmail(settings.API_SMTP_SENDER, [email], msg.as_string())
+                logger.info("E-mail notification sent.")
         except Exception as e:
-            logger.error(f"Error sending email to {", ".join(to_emails)}: {e}")
+            logger.error(f"Error sending email: {e}")
 
     def send_email_verification(self, to_email: str) -> None:
         """
@@ -113,7 +135,9 @@ class Notifications:
         self.add(
             to_emails=[to_email],
             subject=settings.NOTIFICATION_MAIL_UPDATED["subject"],
-            message=settings.NOTIFICATION_MAIL_UPDATED["message"],
+            message=settings.NOTIFICATION_MAIL_UPDATED["message"].format(
+                branding_name=settings.BRANDING_NAME
+            ),
         )
 
     def send_transcription_finished(self, to_email: str) -> None:
@@ -129,8 +153,13 @@ class Notifications:
 
         self.add(
             to_emails=[to_email],
-            subject=settings.NOTIFICATION_MAIL_TRANSCRIPTION_FINISHED["subject"],
-            message=settings.NOTIFICATION_MAIL_TRANSCRIPTION_FINISHED["message"],
+            subject=settings.NOTIFICATION_MAIL_TRANSCRIPTION_FINISHED["subject"].format(
+                branding_name=settings.BRANDING_NAME,
+            ),
+            message=settings.NOTIFICATION_MAIL_TRANSCRIPTION_FINISHED["message"].format(
+                branding_name=settings.BRANDING_NAME,
+                branding_frontend_url=settings.BRANDING_FRONTEND_URL,
+            ),
         )
 
     def send_transcription_failed(self, to_email: str) -> None:
@@ -147,7 +176,9 @@ class Notifications:
         self.add(
             to_emails=[to_email],
             subject=settings.NOTIFICATION_MAIL_TRANSCRIPTION_FAILED["subject"],
-            message=settings.NOTIFICATION_MAIL_TRANSCRIPTION_FAILED["message"],
+            message=settings.NOTIFICATION_MAIL_TRANSCRIPTION_FAILED["message"].format(
+                branding_name=settings.BRANDING_NAME,
+            ),
         )
 
     def send_job_deleted(self, to_email: str) -> None:
@@ -164,7 +195,9 @@ class Notifications:
         self.add(
             to_emails=[to_email],
             subject=settings.NOTIFICATION_MAIL_TRANSCRIPTION_DELETED["subject"],
-            message=settings.NOTIFICATION_MAIL_TRANSCRIPTION_DELETED["message"],
+            message=settings.NOTIFICATION_MAIL_TRANSCRIPTION_DELETED["message"].format(
+                branding_name=settings.BRANDING_NAME,
+            ),
         )
 
     def send_job_to_be_deleted(self, to_email: str) -> None:
@@ -181,7 +214,11 @@ class Notifications:
         self.add(
             to_emails=[to_email],
             subject=settings.NOTIFICATION_MAIL_TRANSCRIPTION_TO_BE_DELETED["subject"],
-            message=settings.NOTIFICATION_MAIL_TRANSCRIPTION_TO_BE_DELETED["message"],
+            message=settings.NOTIFICATION_MAIL_TRANSCRIPTION_TO_BE_DELETED[
+                "message"
+            ].format(
+                branding_name=settings.BRANDING_NAME,
+            ),
         )
 
     def send_new_user_created(self, to_email: str, username: str) -> None:
@@ -199,7 +236,9 @@ class Notifications:
             to_emails=[to_email],
             subject=settings.NOTIFICATION_MAIL_NEW_USER_CREATED["subject"],
             message=settings.NOTIFICATION_MAIL_NEW_USER_CREATED["message"].format(
-                username=username
+                username=username,
+                branding_name=settings.BRANDING_NAME,
+                branding_admin_url=settings.BRANDING_ADMIN_URL,
             ),
         )
 
@@ -268,8 +307,138 @@ class Notifications:
 
         self.add(
             to_emails=[to_email],
-            subject=settings.NOTIFICATION_MAIL_ACCOUNT_ACTIVATED["subject"],
-            message=settings.NOTIFICATION_MAIL_ACCOUNT_ACTIVATED["message"],
+            subject=settings.NOTIFICATION_MAIL_ACCOUNT_ACTIVATED["subject"].format(
+                branding_name=settings.BRANDING_NAME,
+            ),
+            message=settings.NOTIFICATION_MAIL_ACCOUNT_ACTIVATED["message"].format(
+                branding_name=settings.BRANDING_NAME,
+            ),
+        )
+
+    def send_quota_alert(
+        self,
+        to_email: str,
+        customer_name: str,
+        usage_percent: int,
+        blocks_purchased: int,
+        minutes_included: int,
+        minutes_consumed: int,
+        remaining_minutes: int,
+    ) -> None:
+        """
+        Send a quota alert notification to an admin.
+
+        Parameters:
+            to_email (str): The recipient's email address.
+            customer_name (str): The customer name.
+            usage_percent (int): The percentage of quota consumed.
+            blocks_purchased (int): Number of blocks purchased.
+            minutes_included (int): Total minutes included.
+            minutes_consumed (int): Minutes consumed so far.
+            remaining_minutes (int): Minutes remaining.
+
+        Returns:
+            None
+        """
+
+        self.add(
+            to_emails=[to_email],
+            subject=settings.NOTIFICATION_MAIL_QUOTA_ALERT["subject"],
+            message=settings.NOTIFICATION_MAIL_QUOTA_ALERT["message"].format(
+                customer_name=customer_name,
+                usage_percent=usage_percent,
+                blocks_purchased=blocks_purchased,
+                minutes_included=minutes_included,
+                minutes_consumed=minutes_consumed,
+                remaining_minutes=remaining_minutes,
+            ),
+        )
+
+    def send_group_quota_alert(
+        self,
+        to_email: str,
+        group_name: str,
+        usage_percent: int,
+        quota_minutes: int,
+        used_minutes: int,
+        remaining_minutes: int,
+    ) -> None:
+        """
+        Send a group quota alert notification to an admin.
+
+        Parameters:
+            to_email (str): The recipient's email address.
+            group_name (str): The group name.
+            usage_percent (int): The percentage of quota consumed.
+            quota_minutes (int): Total quota in minutes.
+            used_minutes (int): Minutes used so far.
+            remaining_minutes (int): Minutes remaining.
+
+        Returns:
+            None
+        """
+
+        self.add(
+            to_emails=[to_email],
+            subject=settings.NOTIFICATION_MAIL_GROUP_QUOTA_ALERT["subject"],
+            message=settings.NOTIFICATION_MAIL_GROUP_QUOTA_ALERT["message"].format(
+                group_name=group_name,
+                usage_percent=usage_percent,
+                quota_minutes=quota_minutes,
+                used_minutes=used_minutes,
+                remaining_minutes=remaining_minutes,
+            ),
+        )
+
+    def send_weekly_usage_report(
+        self,
+        to_email: str,
+        customer_name: str,
+        total_users: int,
+        transcribed_files: int,
+        transcribed_minutes: int,
+        transcribed_minutes_external: int,
+        blocks_purchased: int,
+        blocks_consumed: float,
+        minutes_included: int,
+        remaining_minutes: int,
+        overage_minutes: int,
+    ) -> None:
+        """
+        Send a weekly usage report notification to an admin.
+
+        Parameters:
+            to_email (str): The recipient's email address.
+            customer_name (str): The customer name.
+            total_users (int): Total number of users.
+            transcribed_files (int): Number of files transcribed.
+            transcribed_minutes (int): Minutes transcribed.
+            transcribed_minutes_external (int): Minutes transcribed externally.
+            blocks_purchased (int): Number of blocks purchased.
+            blocks_consumed (float): Blocks consumed.
+            minutes_included (int): Total minutes included.
+            remaining_minutes (int): Minutes remaining.
+            overage_minutes (int): Overage minutes.
+
+        Returns:
+            None
+        """
+
+        self.add(
+            to_emails=[to_email],
+            subject=settings.NOTIFICATION_MAIL_WEEKLY_USAGE_REPORT["subject"],
+            message=settings.NOTIFICATION_MAIL_WEEKLY_USAGE_REPORT["message"].format(
+                customer_name=customer_name,
+                total_users=total_users,
+                transcribed_files=transcribed_files,
+                transcribed_minutes=transcribed_minutes,
+                transcribed_minutes_external=transcribed_minutes_external,
+                blocks_purchased=blocks_purchased,
+                blocks_consumed=blocks_consumed,
+                minutes_included=minutes_included,
+                remaining_minutes=remaining_minutes,
+                overage_minutes=overage_minutes,
+            ),
         )
 
 

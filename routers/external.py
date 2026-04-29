@@ -1,11 +1,27 @@
+# Copyright (c) 2025-2026 Sunet.
+# Contributor: Kristofer Hallin
+#
+# This file is part of Sunet Scribe.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import aiofiles
-import requests
+import httpx
 
 from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import JSONResponse
-from starlette.concurrency import run_in_threadpool
 from db.job import (
     job_create,
     job_get_by_external_id,
@@ -54,7 +70,7 @@ async def get_job_external(
         JSONResponse: The job status.
     """
 
-    res = job_get_by_external_id(external_id, client_dn)
+    res = await job_get_by_external_id(external_id, client_dn)
 
     if not isinstance(res, dict) and res and res["status"] == "completed":
         logger.error(f"External job not found: {external_id}")
@@ -64,7 +80,7 @@ async def get_job_external(
             },
         )
 
-    if not (job_result := job_result_get_external(external_id)):
+    if not (job_result := await job_result_get_external(external_id)):
         logger.error(f"External job result not found: {external_id}")
         return JSONResponse(
             content={
@@ -74,8 +90,8 @@ async def get_job_external(
 
     try:
         # Decrypt the result text
-        user = user_get(username="api_user")
-        private_key = user_get_private_key(user["user_id"])
+        user = await user_get(username="api_user")
+        private_key = await user_get_private_key(user["user_id"])
         deserialized_private_key = deserialize_private_key_from_pem(
             private_key, settings.API_PRIVATE_KEY_PASSWORD
         )
@@ -113,27 +129,24 @@ async def delete_external_transcription_job(
     Returns:
         JSONResponse: The result of the deletion.
     """
-
-    job = job_get_by_external_id(external_id, client_dn)
+    job = await job_get_by_external_id(external_id, client_dn)
 
     if not job:
         return JSONResponse(
             content={"result": {"error": "Job not found"}}, status_code=404
         )
 
-    if not (status := job_remove(job["uuid"])):
-        logger.error(f"Failed to remove job with external_id {external_id} - status: {status}")
+    # Delete the job from the database
+    status = await job_remove(job["uuid"])
 
-    file_path = Path(api_file_storage_dir) / job["user_id"] / f"{job["uuid"]}"
-    file_path_enc = Path(api_file_storage_dir) / job["user_id"] / f"{job["uuid"]}.mp4.enc"
+    if status is False:
+        logger.debug(f"JOB REMOVE FALSE: {job}")
+
+    # Remove the video file if it exists
+    file_path = Path(api_file_storage_dir) / job["user_id"] / f"{job["uuid"]}.mp4"
 
     if file_path.exists():
-        logger.info(f"Removing file for job {external_id} at {file_path}")
         file_path.unlink()
-
-    if file_path_enc.exists():
-        logger.info(f"Removing encrypted file for job {external_id} at {file_path_enc}")
-        file_path_enc.unlink()
 
     return JSONResponse(content={"result": {"status": "OK"}})
 
@@ -163,9 +176,8 @@ async def transcribe_external_file(
     job = None
 
     try:
-        kaltura_repsonse = await run_in_threadpool(
-            lambda: requests.get(item.file_url, timeout=120)
-        )
+        async with httpx.AsyncClient() as client:
+            kaltura_repsonse = await client.get(item.file_url, timeout=120)
 
         if kaltura_repsonse.status_code != 200:
             raise Exception(
@@ -174,9 +186,9 @@ async def transcribe_external_file(
                 )
             )
 
-        user_create(username=item.user_id, user_id=item.user_id, realm="external")
+        await user_create(username=item.user_id, user_id=item.user_id, realm="external")
 
-        job = job_create(
+        job = await job_create(
             user_id=item.user_id,
             job_type=JobType.TRANSCRIPTION,
             filename=filename,
@@ -194,12 +206,12 @@ async def transcribe_external_file(
         if not file_path.exists():
             file_path.mkdir(parents=True, exist_ok=True)
 
-        if not (api_user := user_get(username="api_user")):
+        if not (api_user := await user_get(username="api_user")):
             return JSONResponse(
                 content={"result": {"error": "API user not found"}}, status_code=500
             )
 
-        public_key = user_get_public_key(api_user["user_id"])
+        public_key = await user_get_public_key(api_user["user_id"])
         public_key = deserialize_public_key_from_pem(public_key)
 
         encrypt_data_to_file(
@@ -212,12 +224,12 @@ async def transcribe_external_file(
     except Exception as e:
         logger.error("Caught exception while creating external job - {}".format(e))
         if job is not None:
-            job = job_update(
+            job = await job_update(
                 job["uuid"], item.user_id, status=JobStatusEnum.FAILED, error=str(e)
             )
         return JSONResponse(content={"result": {"error": str(e)}}, status_code=500)
 
-    job = job_update(job["uuid"], status=JobStatusEnum.PENDING)
+    job = await job_update(job["uuid"], status=JobStatusEnum.PENDING)
 
     return JSONResponse(
         content={

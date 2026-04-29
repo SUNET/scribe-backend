@@ -1,7 +1,23 @@
+# Copyright (c) 2025-2026 Sunet.
+# Contributor: Kristofer Hallin
+#
+# This file is part of Sunet Scribe.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 from authlib.integrations.starlette_client import OAuth
 from authlib.jose import jwt
 from datetime import datetime
-from db.session import get_session
 from db.user import user_create
 from fastapi import HTTPException
 from fastapi import Request
@@ -12,7 +28,6 @@ from utils.settings import get_settings
 
 log = get_logger()
 settings = get_settings()
-db_session = get_session()
 
 oauth = OAuth()
 oauth.register(
@@ -173,7 +188,7 @@ async def verify_user(request: Request, admin: Optional[bool] = False) -> str:
     username = decoded_jwt.get("preferred_username")
     realm = decoded_jwt.get("realm", username.split("@")[-1])
 
-    user = user_create(
+    user = await user_create(
         username=username,
         realm=realm,
         user_id=user_id,

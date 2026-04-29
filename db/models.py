@@ -1,9 +1,27 @@
-from datetime import datetime, timedelta
+# Copyright (c) 2025-2026 Sunet.
+# Contributor: Kristofer Hallin
+#
+# This file is part of Sunet Scribe.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import List, Optional
 from uuid import uuid4
 
 from pydantic import BaseModel
+from sqlalchemy import Column, Index
 from sqlalchemy.types import Enum as SQLAlchemyEnum
 from sqlmodel import Field, Relationship, SQLModel
 
@@ -150,6 +168,9 @@ class JobResult(SQLModel, table=True):
     """
 
     __tablename__ = "job_results"
+    __table_args__ = (
+        Index("ix_job_results_job_id_user_id", "job_id", "user_id"),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True, description="Primary key")
     job_id: str = Field(
@@ -170,7 +191,7 @@ class JobResult(SQLModel, table=True):
         description="SRT formatted transcription result",
     )
     created_at: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(UTC).replace(tzinfo=None),
         description="Creation timestamp",
     )
     external_id: str = Field(
@@ -203,6 +224,12 @@ class Job(SQLModel, table=True):
     """
 
     __tablename__ = "jobs"
+    __table_args__ = (
+        Index("ix_jobs_user_id_job_type", "user_id", "job_type"),
+        Index("ix_jobs_status_deletion_date", "status", "deletion_date"),
+        Index("ix_jobs_user_id_created_at", "user_id", "created_at"),
+        Index("ix_jobs_status_created_at", "status", "created_at"),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True, description="Primary key")
     uuid: str = Field(
@@ -244,16 +271,16 @@ class Job(SQLModel, table=True):
         description="Type of the job",
     )
     created_at: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(UTC).replace(tzinfo=None),
         description="Creation timestamp",
     )
     updated_at: datetime = Field(
-        sa_column_kwargs={"onupdate": datetime.utcnow},
-        default_factory=datetime.utcnow,
+        sa_column_kwargs={"onupdate": lambda: datetime.now(UTC).replace(tzinfo=None)},
+        default_factory=lambda: datetime.now(UTC).replace(tzinfo=None),
         description="Last updated timestamp",
     )
     deletion_date: datetime = Field(
-        default_factory=lambda: datetime.utcnow() + timedelta(days=7),
+        default_factory=lambda: datetime.now(UTC).replace(tzinfo=None) + timedelta(days=7),
         description="Date when the job will be deleted",
     )
     language: str = Field(default="Swedish", description="Language used for the job")
@@ -313,6 +340,10 @@ class GroupUserLink(SQLModel, table=True):
     """
 
     __tablename__ = "group_user_link"
+    __table_args__ = (
+        Index("ix_group_user_link_group_id_user_id", "group_id", "user_id"),
+        Index("ix_group_user_link_user_id_group_id", "user_id", "group_id"),
+    )
 
     group_id: Optional[int] = Field(
         default=None, foreign_key="groups.id", primary_key=True
@@ -324,6 +355,16 @@ class GroupUserLink(SQLModel, table=True):
     in_group: bool = Field(
         default=True, description="Indicates if the user is currently in the group"
     )
+
+
+class DarkModeEnum(str, Enum):
+    """
+    Enum representing the user's theme preference.
+    """
+
+    DARK = "dark"
+    LIGHT = "light"
+    AUTO = "auto"
 
 
 class User(SQLModel, table=True):
@@ -366,7 +407,7 @@ class User(SQLModel, table=True):
         description="Transcribed seconds",
     )
     last_login: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(UTC).replace(tzinfo=None),
         description="Last login timestamp",
     )
     active: bool = Field(
@@ -396,6 +437,33 @@ class User(SQLModel, table=True):
         default=None,
         description="User's notification preferences",
     )
+    deleted: bool = Field(
+        default=False,
+        description="Indicates if the user has been soft-deleted",
+    )
+    manually_deactivated: bool = Field(
+        default=False,
+        description="Indicates if the user was manually deactivated by an admin",
+    )
+    manually_activated: bool = Field(
+        default=False,
+        description="Indicates if the user was manually activated by an admin, preventing rules from deactivating",
+    )
+    dark_mode: DarkModeEnum = Field(
+        default=DarkModeEnum.AUTO,
+        sa_column=Column(
+            "dark_mode",
+            SQLAlchemyEnum(
+                DarkModeEnum,
+                name="darkmodeenum",
+                values_callable=lambda x: [e.value for e in x],
+                create_type=False,
+            ),
+            nullable=False,
+            server_default="auto",
+        ),
+        description="User's theme preference: dark, light, or auto",
+    )
 
     def as_dict(self) -> dict:
         """
@@ -413,6 +481,9 @@ class User(SQLModel, table=True):
             "email": self.email,
             "encryption_settings": self.encryption_settings,
             "last_login": str(self.last_login),
+            "deleted": self.deleted,
+            "manually_activated": self.manually_activated,
+            "manually_deactivated": self.manually_deactivated,
             "notifications": self.notifications,
             "private_key": self.private_key,
             "public_key": self.public_key,
@@ -420,6 +491,7 @@ class User(SQLModel, table=True):
             "transcribed_seconds": self.transcribed_seconds,
             "user_id": self.user_id,
             "username": self.username,
+            "dark_mode": self.dark_mode,
         }
 
 
@@ -463,6 +535,9 @@ class GroupModelLink(SQLModel, table=True):
     """
 
     __tablename__ = "group_model_link"
+    __table_args__ = (
+        Index("ix_group_model_link_group_id_model_id", "group_id", "model_id"),
+    )
 
     group_id: int = Field(foreign_key="groups.id", primary_key=True)
     model_id: int = Field(foreign_key="models.id", primary_key=True)
@@ -566,6 +641,10 @@ class Customer(SQLModel, table=True):
         default=None,
         description="Contact email for the customer organization",
     )
+    support_contact_email: Optional[str] = Field(
+        default=None,
+        description="Support contact email shown to end users in the help dialog",
+    )
     priceplan: PricePlanEnum = Field(
         default=PricePlanEnum.VARIABLE,
         sa_column=Field(sa_column=SQLAlchemyEnum(PricePlanEnum)),
@@ -584,7 +663,7 @@ class Customer(SQLModel, table=True):
         description="Additional notes about the customer",
     )
     created_at: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(UTC).replace(tzinfo=None),
         description="Creation timestamp",
     )
     blocks_purchased: Optional[int] = Field(
@@ -605,6 +684,7 @@ class Customer(SQLModel, table=True):
             "partner_id": self.partner_id,
             "name": self.name,
             "contact_email": self.contact_email,
+            "support_contact_email": self.support_contact_email,
             "priceplan": self.priceplan,
             "base_fee": self.base_fee if self.base_fee else 0,
             "realms": self.realms,
@@ -620,6 +700,9 @@ class NotificationsSent(SQLModel, table=True):
     """
 
     __tablename__ = "notifications_sent"
+    __table_args__ = (
+        Index("ix_notifications_sent_user_id_uuid_type", "user_id", "uuid", "notification_type"),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True, description="Primary key")
     user_id: str = Field(
@@ -632,7 +715,7 @@ class NotificationsSent(SQLModel, table=True):
         description="Type of notification sent",
     )
     sent_at: datetime = Field(
-        default_factory=datetime.utcnow,
+        default_factory=lambda: datetime.now(UTC).replace(tzinfo=None),
         description="Timestamp when the notification was sent",
     )
     uuid: str = Field(
@@ -657,95 +740,217 @@ class NotificationsSent(SQLModel, table=True):
         }
 
 
+class PageView(SQLModel, table=True):
+    """
+    Model representing anonymous page view events for analytics.
+    """
+
+    __tablename__ = "page_views"
+    __table_args__ = (
+        Index("ix_page_views_timestamp_path", "timestamp", "path"),
+        Index("ix_page_views_path_timestamp", "path", "timestamp"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True, description="Primary key")
+    path: str = Field(index=True, description="Page path that was visited")
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(UTC).replace(tzinfo=None),
+        index=True,
+        description="Timestamp of the page view",
+    )
+
+
 class AttributeConditionEnum(str, Enum):
     """
-    Enum representing attribute conditions for access control.
+    Enum representing the condition type for attribute matching.
     """
 
-    EQUALS = "equals"
-    NOT_EQUALS = "not_equals"
-    CONTAINS = "contains"
-    NOT_CONTAINS = "not_contains"
-    STARTS_WITH = "starts_with"
-    ENDS_WITH = "ends_with"
-    REGEX_MATCH = "regex_match"
+    EQUALS = "EQUALS"
+    NOT_EQUALS = "NOT_EQUALS"
+    CONTAINS = "CONTAINS"
+    NOT_CONTAINS = "NOT_CONTAINS"
+    STARTS_WITH = "STARTS_WITH"
+    ENDS_WITH = "ENDS_WITH"
+    REGEX_MATCH = "REGEX_MATCH"
 
 
-class AttributeRules(SQLModel, table=True):
+class AttributeRule(SQLModel, table=True):
     """
-    Model representing attribute-based access control rules.
+    Model representing an attribute-based rule for automatic
+    group assignment and user provisioning.
     """
 
     __tablename__ = "attribute_rules"
 
     id: Optional[int] = Field(default=None, primary_key=True, description="Primary key")
-    name: str = Field(
-        default=None,
-        index=True,
-        description="Name of the attribute rule",
-    )
+    name: str = Field(index=True, description="Human-readable rule name")
     attribute_name: str = Field(
-        default=None,
-        index=True,
-        description="Name of the attribute",
+        index=True, description="JWT claim / SAML friendly name to match"
     )
     attribute_condition: AttributeConditionEnum = Field(
-        default=None,
         sa_column=Field(sa_column=SQLAlchemyEnum(AttributeConditionEnum)),
-        description="Condition to apply on the attribute",
+        description="Condition used to evaluate the attribute value",
     )
-    attribute_value: str = Field(
-        default=None,
-        description="Value of the attribute",
-    )
+    attribute_value: str = Field(description="Value to compare against")
     created_at: datetime = Field(
-        default_factory=datetime.utcnow,
-        description="Creation timestamp",
+        default_factory=lambda: datetime.now(UTC).replace(tzinfo=None), description="Creation timestamp"
     )
+    enabled: bool = Field(
+        default=True, description="Whether this rule is currently active"
+    )
+
+    # Actions when rule matches
     activate: bool = Field(
         default=False,
-        description="Whether to activate the user if the rule matches",
+        description="Automatically activate matching users",
     )
     admin: bool = Field(
         default=False,
-        description="Whether to grant admin rights if the rule matches",
+        description="Grant admin privileges to matching users",
+    )
+    deny: bool = Field(
+        default=False,
+        description="Deny access to matching users",
     )
     assign_to_group: Optional[str] = Field(
         default=None,
-        description="Group to assign the user to if the rule matches",
+        description="Group ID to assign matching users to",
     )
-    assign_to_admin_domains: Optional[str] = Field(
-        default=None,
-        description="Admin domain to assign the user to if the rule matches",
+    notify_job: bool = Field(
+        default=False,
+        description="Enable transcription completed notifications for matching users",
+    )
+    notify_deletion: bool = Field(
+        default=False,
+        description="Enable upcoming file deletion notifications for matching users",
+    )
+    # Scope
+    realm: Optional[str] = Field(
+        default=None, index=True, description="Realm this rule applies to"
     )
     owner_domains: Optional[str] = Field(
         default=None,
-        description="Owner domains for the rule",
-    )
-    realm_filter: Optional[str] = Field(
-        default=None,
-        description="Realm filter for the rule",
+        description="Comma-separated domains whose admins can manage this rule",
     )
 
     def as_dict(self) -> dict:
-        """
-        Convert the attribute rule object to a dictionary.
-
-        Returns:
-            dict: The attribute rule object as a dictionary.
-        """
-
         return {
             "id": self.id,
             "name": self.name,
-            "activate": self.activate,
-            "admin": self.admin,
-            "assign_to_admin_domains": self.assign_to_admin_domains,
-            "assign_to_group": self.assign_to_group,
-            "attribute_condition": self.attribute_condition,
             "attribute_name": self.attribute_name,
+            "attribute_condition": self.attribute_condition.value
+            if self.attribute_condition
+            else None,
             "attribute_value": self.attribute_value,
             "created_at": str(self.created_at),
+            "enabled": self.enabled,
+            "activate": self.activate,
+            "admin": self.admin,
+            "deny": self.deny,
+            "assign_to_group": self.assign_to_group,
+            "notify_job": self.notify_job,
+            "notify_deletion": self.notify_deletion,
+            "realm": self.realm,
             "owner_domains": self.owner_domains,
-            "realm_filter": self.realm_filter,
         }
+
+
+class OnboardingAttribute(SQLModel, table=True):
+    """
+    Model representing a supported SAML/JWT attribute that can be used
+    when configuring attribute rules.
+    """
+
+    __tablename__ = "onboarding_attributes"
+
+    id: Optional[int] = Field(default=None, primary_key=True, description="Primary key")
+    name: str = Field(
+        index=True, unique=True, description="Attribute friendly name"
+    )
+    description: str = Field(default="", description="Human-readable description")
+    example: str = Field(default="", description="Example value")
+
+    def as_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "description": self.description,
+            "example": self.example,
+        }
+
+
+class AnnouncementSeverityEnum(str, Enum):
+    """
+    Enum representing the severity level of an announcement.
+    """
+
+    INFO = "info"
+    MAINTENANCE = "maintenance"
+    MAJOR_INCIDENT = "major_incident"
+
+
+class Announcement(SQLModel, table=True):
+    """
+    Model representing a system-wide announcement banner.
+    All times are in server-local time.
+    """
+
+    __tablename__ = "announcements"
+
+    id: Optional[int] = Field(default=None, primary_key=True, description="Primary key")
+    message: str = Field(description="Announcement message (may contain HTML links)")
+    severity: AnnouncementSeverityEnum = Field(
+        default=AnnouncementSeverityEnum.INFO,
+        sa_column=Field(sa_column=SQLAlchemyEnum(AnnouncementSeverityEnum)),
+        description="Severity level: info, maintenance, or major_incident",
+    )
+    starts_at: Optional[datetime] = Field(
+        default=None,
+        description="When the announcement becomes visible (server time, NULL = immediate)",
+    )
+    ends_at: Optional[datetime] = Field(
+        default=None,
+        description="When the announcement stops being visible (server time, NULL = no end)",
+    )
+    enabled: bool = Field(
+        default=True,
+        description="Whether this announcement is currently active",
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC).replace(tzinfo=None),
+        description="Creation timestamp",
+    )
+    created_by: Optional[str] = Field(
+        default=None,
+        description="Username of the admin who created this announcement",
+    )
+
+    def as_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "message": self.message,
+            "severity": self.severity.value if hasattr(self.severity, "value") else (self.severity or "info"),
+            "starts_at": str(self.starts_at) if self.starts_at else None,
+            "ends_at": str(self.ends_at) if self.ends_at else None,
+            "enabled": self.enabled,
+            "created_at": str(self.created_at),
+            "created_by": self.created_by,
+        }
+
+
+class WorkerHealth(SQLModel, table=True):
+    __tablename__ = "worker_health"
+    __table_args__ = (
+        Index("ix_worker_health_worker_id", "worker_id"),
+        Index("ix_worker_health_worker_id_created_at", "worker_id", "created_at"),
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    worker_id: str = Field(description="Identifier of the GPU worker")
+    load_avg: float = Field(default=0, description="Load average")
+    memory_usage: float = Field(default=0, description="Memory usage")
+    gpu_usage: Optional[str] = Field(default=None, description="GPU usage as JSON")
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC).replace(tzinfo=None),
+        description="Timestamp when the health entry was recorded",
+    )
