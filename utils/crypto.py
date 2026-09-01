@@ -24,6 +24,7 @@ import aiofiles
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from typing import Iterator, Optional, Protocol, Tuple
 
 
@@ -231,6 +232,75 @@ def decrypt_string(
     plaintext = AESGCM(aes_key).decrypt(nonce, ciphertext, None)
 
     return plaintext.decode("utf-8")
+
+
+def derive_key(secret: str, info: bytes, length: int = 32) -> bytes:
+    """
+    Derive a key from a high-entropy secret.
+
+    HKDF rather than a bare hash so that several independent keys can be
+    taken from one secret: two derivations with different `info` labels say
+    nothing about each other, which is what lets one secret act both as a
+    lookup handle and as an encryption key. No salt, because the input is
+    already uniform random -- do not call this with a password.
+
+    Parameters:
+        secret (str): The high-entropy input, e.g. a secrets.token_urlsafe().
+        info (bytes): Label separating this derivation from any other.
+        length (int): Key length in bytes.
+
+    Returns:
+        bytes: The derived key.
+    """
+
+    return HKDF(
+        algorithm=hashes.SHA256(),
+        length=length,
+        salt=None,
+        info=info,
+    ).derive(secret.encode("utf-8"))
+
+
+def encrypt_with_key(key: bytes, plaintext: str) -> str:
+    """
+    Encrypt a short string with a caller-supplied AES-GCM key.
+
+    For data small enough to hold in memory and keyed by something other
+    than a user's RSA keypair -- see encrypt_string() for the hybrid scheme
+    used for stored user content.
+
+    Parameters:
+        key (bytes): A 32-byte AES-GCM key.
+        plaintext (str): The string to encrypt.
+
+    Returns:
+        str: Nonce and ciphertext as a hex string, safe for a text column.
+    """
+
+    nonce = os.urandom(12)
+    ciphertext = AESGCM(key).encrypt(nonce, plaintext.encode("utf-8"), None)
+
+    return (nonce + ciphertext).hex()
+
+
+def decrypt_with_key(key: bytes, blob: str) -> str:
+    """
+    Decrypt data written by encrypt_with_key().
+
+    Parameters:
+        key (bytes): The same 32-byte AES-GCM key.
+        blob (str): The hex string produced by encrypt_with_key().
+
+    Returns:
+        str: The plaintext.
+
+    Raises:
+        InvalidTag: Wrong key, or tampered data.
+    """
+
+    data = bytes.fromhex(blob)
+
+    return AESGCM(key).decrypt(data[:12], data[12:], None).decode("utf-8")
 
 
 def encrypt_data_to_file(

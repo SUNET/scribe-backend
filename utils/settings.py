@@ -83,6 +83,13 @@ class Settings(BaseSettings):
     # Customer config
     CUSTOMER_MINUTES_PER_BLOCK: int = 4000
 
+    # How long the one-time code from the OIDC callback stays good. It is
+    # redeemed by the frontend's server as it renders the landing page, so
+    # this covers a redirect and one request -- not a reader who leaves the
+    # tab open. Short on purpose: for its lifetime the row it names is a
+    # complete set of credentials.
+    AUTH_HANDOFF_TTL_SECONDS: int = 60
+
     # Crypto configuration.
     CRYPTO_KEY_SIZE: int = 4096
     CRYPTO_CHUNK_SIZE: int = (
