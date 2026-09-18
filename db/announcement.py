@@ -113,7 +113,7 @@ async def announcement_delete(announcement_id: int) -> bool:
         announcement = await session.get(Announcement, announcement_id)
         if not announcement:
             return False
-        session.delete(announcement)
+        await session.delete(announcement)
         return True
 
 

@@ -283,7 +283,7 @@ async def customer_delete(customer_id: int) -> bool:
         if not (customer := result.scalars().first()):
             return False
 
-        session.delete(customer)
+        await session.delete(customer)
 
     log.info(f"Customer {customer.name} (ID: {customer.id}) deleted.")
 

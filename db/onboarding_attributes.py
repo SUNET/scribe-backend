@@ -83,5 +83,5 @@ async def attribute_delete(attribute_id: int) -> bool:
         attr = result.scalars().first()
         if not attr:
             return False
-        session.delete(attr)
+        await session.delete(attr)
         return True
