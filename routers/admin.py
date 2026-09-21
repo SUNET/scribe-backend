@@ -27,6 +27,7 @@ from db.user import (
     group_statistics,
 )
 from db.group import (
+    GroupMembershipConflict,
     group_get,
     group_get_all,
     group_create,
@@ -402,7 +403,7 @@ async def update_group(
             quota_seconds=int(item.quota),
         ):
             return JSONResponse(content={"error": "Group not found"}, status_code=404)
-    except ValueError as e:
+    except GroupMembershipConflict as e:
         return JSONResponse(content={"error": str(e)}, status_code=400)
 
     return JSONResponse(content={"result": {"status": "ok"}})
