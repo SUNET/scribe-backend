@@ -39,6 +39,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
+from authlib.integrations.base_client import MismatchingStateError, OAuthError
+
 from db.models import AuthHandoff
 from db.auth_handoff import (
     _lookup_hash,
@@ -456,3 +458,53 @@ def test_a_login_that_cannot_be_stored_is_not_completed(api_client, monkeypatch)
     assert "error=login_failed" in location
     assert ID_TOKEN not in location
     assert REFRESH_TOKEN not in location
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        pytest.param(MismatchingStateError(), id="state-mismatch"),
+        pytest.param(OAuthError(error="access_denied"), id="provider-error"),
+    ],
+)
+def test_a_rejected_callback_sends_the_reader_back(api_client, monkeypatch, error):
+    """
+    A callback whose state does not match the session (back button, a
+    reloaded callback URL, a second tab) or that carries an error from the
+    provider is refused -- with a redirect to the sign-in page, not a 500,
+    and without ever reaching the handoff.
+    """
+
+    client, app_module = api_client
+
+    async def authorize(request):
+        raise error
+
+    async def create(id_token, refresh_token=None):
+        raise AssertionError("a rejected callback must not create a handoff")
+
+    monkeypatch.setattr(app_module.oauth.auth0, "authorize_access_token", authorize)
+    monkeypatch.setattr(app_module, "handoff_create", create)
+
+    response = client.get("/api/auth?code=x&state=y", follow_redirects=False)
+
+    assert response.status_code == 307
+    assert response.headers["location"].endswith("/?error=login_failed")
+
+
+def test_a_callback_without_userinfo_sends_the_reader_back(api_client, monkeypatch):
+    client, app_module = api_client
+
+    async def authorize(request):
+        return {"id_token": ID_TOKEN, "access_token": "an-access-token"}
+
+    async def create(id_token, refresh_token=None):
+        raise AssertionError("a callback without userinfo must not create a handoff")
+
+    monkeypatch.setattr(app_module.oauth.auth0, "authorize_access_token", authorize)
+    monkeypatch.setattr(app_module, "handoff_create", create)
+
+    location = client.get("/api/auth", follow_redirects=False).headers["location"]
+
+    assert location.endswith("/?error=login_failed")
+    assert ID_TOKEN not in location

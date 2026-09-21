@@ -24,6 +24,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from apscheduler.schedulers.background import BackgroundScheduler
+from authlib.integrations.base_client import OAuthError
 from apscheduler.triggers.cron import CronTrigger
 from fastapi_utils.tasks import repeat_every
 from starlette.formparsers import MultiPartParser
@@ -313,10 +314,24 @@ async def auth(request: Request):
         RedirectResponse: Redirects to the frontend with tokens.
     """
 
-    token = await oauth.auth0.authorize_access_token(request)
+    # A callback that fails here is almost always a reader's browser, not a
+    # fault: the state cookie from /api/login is gone or belongs to another
+    # attempt (back button, a bookmarked or reloaded callback URL, a second
+    # tab, a login left open past the cookie's life), or the provider sent
+    # an error instead of a code. Nothing about this request can be trusted,
+    # so it is refused -- but with a way back to the sign-in page rather
+    # than a 500. Only the error code is logged; the query string carries
+    # the authorization code and state.
+    try:
+        token = await oauth.auth0.authorize_access_token(request)
+    except OAuthError as e:
+        log.warning("OIDC callback rejected: %s", e.error)
+        return RedirectResponse(url=f"{settings.OIDC_FRONTEND_URI}/?error=login_failed")
+
     userinfo = token.get("userinfo")
     if not userinfo:
-        raise ValueError("Failed to get userinfo from token")
+        log.error("OIDC callback returned no userinfo, sending the user back.")
+        return RedirectResponse(url=f"{settings.OIDC_FRONTEND_URI}/?error=login_failed")
 
     # Evaluate attribute-based onboarding rules at login time
     try:
