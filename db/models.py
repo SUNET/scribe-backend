@@ -999,3 +999,44 @@ class WorkerHealth(SQLModel, table=True):
         default_factory=lambda: datetime.now(UTC).replace(tzinfo=None),
         description="Timestamp when the health entry was recorded",
     )
+
+
+class AuthHandoff(SQLModel, table=True):
+    """
+    One login's tokens, waiting to be collected once by the frontend.
+
+    The OIDC callback used to hand the id token and the refresh token to the
+    frontend by putting them in the query string of its redirect. That left
+    them in the browser's history, in the referrer of whatever the landing
+    page loaded next, and in the access log of everything in between. A row
+    here replaces that: the callback stores the tokens, redirects with a
+    single-use code instead, and the frontend's server exchanges the code
+    for them out of band. The tokens never touch the browser.
+
+    A row lives for AUTH_HANDOFF_TTL_SECONDS and is deleted the moment it is
+    redeemed -- redemption is a DELETE ... RETURNING, so two exchanges of
+    one code cannot both win no matter which of the eight worker processes
+    they land in.
+
+    Neither column can be read from this table alone. `code_hash` is a
+    derivation of the code, not the code, and the tokens are encrypted under
+    a second, independent derivation of that same code -- which is never
+    stored anywhere. A dump of this table is ciphertext without a key.
+    """
+
+    __tablename__ = "auth_handoff"
+
+    code_hash: str = Field(
+        primary_key=True, description="HKDF of the one-time code, never the code"
+    )
+    id_token: str = Field(description="OIDC id token, encrypted under the code")
+    refresh_token: Optional[str] = Field(
+        default=None, description="OIDC refresh token, encrypted under the code"
+    )
+    expires_at: datetime = Field(
+        index=True, description="After this the code is refused and swept"
+    )
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(UTC).replace(tzinfo=None),
+        description="When the login that produced this finished",
+    )

@@ -30,6 +30,7 @@ FastAPI backend for Sunet Scribe (transcription service). Requires Python ≥ 3.
 Treat every change as a potential attack surface. Required checks for any PR:
 
 - **Authn/Authz**: every router endpoint must depend on `verify_user` (with `admin=True` / BOFH check where appropriate). New endpoints default to authenticated; mark public ones explicitly. Realm scoping uses `_get_admin_allowed_realms()` / `_rule_realm_overlaps()` in `routers/admin.py` — reuse, don't reimplement.
+- **Login handoff**: the `/api/auth` callback redirects with a one-time code, never with tokens. See *Login handoff* below; do not put anything that works as a credential in a URL.
 - **JWT verification**: never trust unverified claims. Use `verify_token` from `auth/oidc.py`. Rule evaluation runs **once at login** in `/api/auth` callback — do not move it to per-request paths (perf + auth-bypass risk).
 - **Session cookies**: `SessionMiddleware` is configured `https_only` outside debug, `same_site=lax`. Do not weaken. `API_SECRET_KEY` must come from settings, never hardcoded.
 - **CORS**: allowlist only — current config in `app.py` derives origins from `BRANDING_*_URL` settings. Never add `allow_origins=["*"]` with `allow_credentials=True`.
@@ -59,6 +60,45 @@ Treat every change as a potential attack surface. Required checks for any PR:
 - **Scheduler**: single-worker via file lock (`acquire_scheduler_lock` in `app.py`). Multi-process deploys rely on this — do not duplicate scheduled jobs in handler code.
 - **Caching**: `cachetools` available for in-process caches (OIDC JWKS, etc.). Set TTLs; never cache per-user data process-wide.
 - **Logging**: avoid f-string-evaluating expensive args in debug logs that may be filtered out — use `%`-style lazy formatting where it matters.
+
+## Login handoff (`db/auth_handoff.py`)
+
+How a finished OIDC login gets its tokens to the frontend. `/api/auth` used to redirect to
+`{OIDC_FRONTEND_URI}/?token=<id_token>&refresh_token=<refresh_token>`, which put a working set of
+credentials in the browser's history, in the referrer of everything the landing page went on to load,
+and in the access log of every proxy in between. It now stores them and redirects with a one-time
+code instead; the frontend's own server posts that code to `POST /api/auth/exchange` and gets the
+tokens back over a connection of its own. **The browser never sees a token.** The frontend needs
+`OIDC_APP_EXCHANGE_ROUTE` pointing at that endpoint — it is a new setting, so a deployment that does
+not add it cannot log anyone in.
+
+The row is in the database rather than in memory because the Dockerfile runs `--workers 8`: the
+redirect lands in one process and the exchange in another, so an in-process dictionary would work
+perfectly in development and fail seven times in eight in production.
+
+Three things carry the security and none of them are decoration:
+
+- **Redemption is one statement** — `DELETE ... RETURNING`. It is the delete that decides who won, so
+  a code cannot be redeemed twice however many processes race for it, and the tokens leave the
+  database at the moment they are handed over rather than waiting for a sweeper. Do not turn this
+  back into a read followed by a delete.
+- **The code is never stored.** What is stored is one HKDF derivation of it as the lookup handle,
+  while the tokens are encrypted (`encrypt_with_key`, AES-GCM) under a second, independent derivation
+  of the same code. The two labels in `db/auth_handoff.py` are what keeps them independent. A dump of
+  `auth_handoff` is ciphertext without a key.
+- **A login that cannot be stored is not completed.** `handoff_create()` returning `None` sends the
+  reader back with `?error=login_failed`. There is no fallback to the query string — that is the
+  thing being removed.
+
+`/api/auth/exchange` is deliberately unauthenticated, because the code *is* the credential. It is
+public in `tests/test_autentication.py`'s allowlist for that reason. Unknown, spent and expired all
+answer the same 400, so it tells a prober nothing; there is no rate limit because there is nothing to
+throttle against 256 bits of `secrets.token_urlsafe`. `AUTH_HANDOFF_TTL_SECONDS` (60) covers a
+redirect and one request, not a reader who leaves the tab open. Redeemed rows delete themselves, so
+`remove_expired_auth_handoffs` in `app.py` only ever sweeps logins abandoned between the provider and
+the landing page.
+
+Never log a code, a token, or the contents of one of these rows.
 
 ## Admin hierarchy
 
@@ -115,4 +155,4 @@ Flat and time-ordered rather than nested per segment, so it survives the user re
 .venv/bin/python -m pytest
 ```
 
-Suites: `test_autentication.py`, `test_crypto.py`, `test_rules.py`. Add a test for any auth/permission/crypto change before merging.
+Suites: `test_autentication.py`, `test_auth_handoff.py`, `test_crypto.py`, `test_rules.py`. Add a test for any auth/permission/crypto change before merging.

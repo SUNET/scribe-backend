@@ -32,6 +32,15 @@ log = get_logger()
 settings = get_settings()
 
 
+class RejectedOperation(Exception):
+    """
+    A request the database layer refuses by design, e.g. a user who is
+    already in another group. The session rolls it back without logging a
+    traceback, since the caller turns it into a 4xx. Genuine faults must not
+    use this -- they belong in the error log.
+    """
+
+
 def make_async_url(url: str) -> str:
     """
     Convert a sync database URL to its async driver equivalent.
@@ -185,6 +194,9 @@ async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
     try:
         yield session
         await session.commit()
+    except RejectedOperation:
+        await session.rollback()
+        raise
     except Exception:
         log.error("Async session rollback because of exception", exc_info=True)
         await session.rollback()

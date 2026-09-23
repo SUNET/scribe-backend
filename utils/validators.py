@@ -15,7 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Literal, Optional
 
 
@@ -177,3 +177,18 @@ class UpdateAnnouncementRequest(BaseModel):
     starts_at: Optional[str] = None
     ends_at: Optional[str] = None
     enabled: Optional[bool] = None
+
+
+class AuthExchangeRequest(BaseModel):
+    """
+    The one-time code from the OIDC callback's redirect, presented by the
+    frontend's server in exchange for the login's tokens.
+
+    Strict, because this is the one request that can hand out credentials
+    without carrying any: nothing but a code of the right shape gets as far
+    as a database lookup.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: str = Field(min_length=16, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")

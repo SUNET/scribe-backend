@@ -24,6 +24,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from apscheduler.schedulers.background import BackgroundScheduler
+from authlib.integrations.base_client import OAuthError
 from apscheduler.triggers.cron import CronTrigger
 from fastapi_utils.tasks import repeat_every
 from starlette.formparsers import MultiPartParser
@@ -31,6 +32,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from auth.oidc import RefreshToken, oauth, verify_token, verify_user
 from db.analytics import log_page_view
+from db.auth_handoff import handoff_cleanup, handoff_create, handoff_redeem
 from db.onboarding_attributes import seed_default_attributes
 from db.job import job_cleanup
 from db.attribute_rules import apply_rule_actions, evaluate_rules
@@ -60,6 +62,7 @@ from routers.user import router as user_router
 from routers.videostream import router as videostream_router
 
 from utils.log import get_logger
+from utils.validators import AuthExchangeRequest
 from utils.settings import get_settings
 
 # In-memory spool threshold for multipart bodies. Above this, Starlette
@@ -311,10 +314,24 @@ async def auth(request: Request):
         RedirectResponse: Redirects to the frontend with tokens.
     """
 
-    token = await oauth.auth0.authorize_access_token(request)
+    # A callback that fails here is almost always a reader's browser, not a
+    # fault: the state cookie from /api/login is gone or belongs to another
+    # attempt (back button, a bookmarked or reloaded callback URL, a second
+    # tab, a login left open past the cookie's life), or the provider sent
+    # an error instead of a code. Nothing about this request can be trusted,
+    # so it is refused -- but with a way back to the sign-in page rather
+    # than a 500. Only the error code is logged; the query string carries
+    # the authorization code and state.
+    try:
+        token = await oauth.auth0.authorize_access_token(request)
+    except OAuthError as e:
+        log.warning("OIDC callback rejected: %s", e.error)
+        return RedirectResponse(url=f"{settings.OIDC_FRONTEND_URI}/?error=login_failed")
+
     userinfo = token.get("userinfo")
     if not userinfo:
-        raise ValueError("Failed to get userinfo from token")
+        log.error("OIDC callback returned no userinfo, sending the user back.")
+        return RedirectResponse(url=f"{settings.OIDC_FRONTEND_URI}/?error=login_failed")
 
     # Evaluate attribute-based onboarding rules at login time
     try:
@@ -346,12 +363,48 @@ async def auth(request: Request):
     except Exception as e:
         log.warning(f"Rule evaluation at login failed: {e}", exc_info=True)
 
-    url = f"{settings.OIDC_FRONTEND_URI}/?token={token['id_token']}"
+    # The tokens go into a row and a single-use code comes back. Putting
+    # them in the query string instead, as this did, left a working set of
+    # credentials in the browser's history, in the referrer of whatever the
+    # landing page loaded next, and in the access log of every proxy on the
+    # way. The frontend's server collects them from /api/auth/exchange over
+    # a connection of its own; the browser never sees them.
+    code = await handoff_create(token["id_token"], token.get("refresh_token"))
 
-    if "refresh_token" in token:
-        url += f"&refresh_token={token['refresh_token']}"
+    if not code:
+        # No falling back to the query string: a login that cannot be
+        # completed safely does not get completed.
+        log.error("Could not store the login handoff, sending the user back.")
+        return RedirectResponse(url=f"{settings.OIDC_FRONTEND_URI}/?error=login_failed")
 
-    return RedirectResponse(url=url)
+    return RedirectResponse(url=f"{settings.OIDC_FRONTEND_URI}/?code={code}")
+
+
+@app.post("/api/auth/exchange")
+async def auth_exchange(request: Request, exchange: AuthExchangeRequest):
+    """
+    Exchange the one-time code from the login redirect for that login's
+    tokens. Called by the frontend's server, not by a browser.
+
+    Deliberately unauthenticated: the code is the credential, which is why
+    it is single-use, expires in AUTH_HANDOFF_TTL_SECONDS and is 256 bits
+    of randomness. Unknown, spent and expired all answer the same 400, so
+    the endpoint tells a prober nothing about which it was.
+
+    Parameters:
+        request (Request): The incoming HTTP request.
+        exchange (AuthExchangeRequest): The one-time code.
+
+    Returns:
+        JSONResponse: The login's tokens, or an error.
+    """
+
+    tokens = await handoff_redeem(exchange.code)
+
+    if not tokens:
+        return JSONResponse({"error": "Invalid or expired code"}, status_code=400)
+
+    return JSONResponse(tokens)
 
 
 @app.get("/api/login")
@@ -448,6 +501,25 @@ def remove_old_jobs() -> None:
         return
 
     job_cleanup()
+
+
+@app.on_event("startup")
+@repeat_every(seconds=60 * 15)
+async def remove_expired_auth_handoffs() -> None:
+    """
+    Periodic task to remove login handoff rows nobody came back for.
+
+    Redeeming a code deletes its own row, so this only sweeps logins
+    abandoned between the provider and the landing page.
+
+    Returns:
+        None
+    """
+
+    if not scheduler_worker:
+        return
+
+    await handoff_cleanup()
 
 
 @app.on_event("startup")

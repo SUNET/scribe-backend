@@ -17,7 +17,7 @@
 
 from db.customer import customer_get_from_user_id
 from db.models import Group, GroupModelLink, GroupUserLink, User
-from db.session import get_async_session, get_session
+from db.session import RejectedOperation, get_async_session, get_session
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 from typing import Optional
@@ -26,6 +26,10 @@ from utils.log import get_logger
 from utils.notifications import notifications
 
 log = get_logger()
+
+
+class GroupMembershipConflict(RejectedOperation):
+    """A user can only be a member of one group."""
 
 
 # Helper to add eager loading options for Group relationships
@@ -425,7 +429,7 @@ async def group_update(
 
                 for link, group_name in existing_links:
                     username = id_to_username.get(link.user_id, "unknown")
-                    raise ValueError(
+                    raise GroupMembershipConflict(
                         f'User {username} is already in the group "{group_name}".'
                     )
 
