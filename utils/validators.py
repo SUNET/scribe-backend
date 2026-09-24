@@ -88,6 +88,19 @@ class TranscribeExternalPost(BaseModel):
     service_id: Optional[str]
 
 
+class RecordingFinishRequest(BaseModel):
+    """
+    What the browser says about a recording when it ends: how many parts
+    make it up, what the reader called it and what type of audio it is.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    parts: int = Field(ge=1, le=20000)
+    name: str = Field(default="", max_length=500)
+    mime: str = Field(max_length=100)
+
+
 class VideoStreamRequestBody(BaseModel):
     encryption_password: Optional[str] = ""
 

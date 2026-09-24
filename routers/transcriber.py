@@ -16,7 +16,8 @@
 # limitations under the License.
 
 from fastapi import APIRouter, UploadFile, Request, Depends, Query, File
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+from urllib.parse import quote
 from db.job import (
     job_create,
     job_remove,
@@ -43,9 +44,16 @@ from utils.crypto import (
     encrypt_string,
     decrypt_string,
     encrypt_stream_to_file,
+    decrypt_data_from_file,
+    get_encrypted_file_size,
 )
 from utils.log import get_logger
-from utils.validators import TranscriptionStatusPut, TranscriptionResultPut
+from utils.recordings import media_type, original_path
+from utils.validators import (
+    TranscriptionStatusPut,
+    TranscriptionResultPut,
+    VideoStreamRequestBody,
+)
 
 router = APIRouter(tags=["transcriber"])
 settings = get_settings()
@@ -96,6 +104,13 @@ async def transcribe(
         res = await job_get(job_id, user["user_id"])
     else:
         res = await job_get_all(user["user_id"])
+
+    # A recording made in the browser keeps its original for download.
+    if isinstance(res, dict) and "jobs" in res:
+        for job in res["jobs"]:
+            job["has_original"] = original_path(user["user_id"], job["uuid"]).exists()
+    elif isinstance(res, dict) and "uuid" in res:
+        res["has_original"] = original_path(user["user_id"], res["uuid"]).exists()
 
     # Try to decrypt filenames
     try:
@@ -499,3 +514,56 @@ async def get_transcription_words(
             content = job_result.get("result_words") or ""
 
     return JSONResponse(content={"result": content})
+
+
+@router.post("/transcriber/{job_id}/original")
+async def get_original_recording(
+    job_id: str,
+    item: VideoStreamRequestBody,
+    user: dict = Depends(get_current_user),
+):
+    """
+    Download the original of a recording made in the browser.
+
+    Kept encrypted for its owner (see utils/recordings.py), so only the
+    owner's encryption password opens it.  A POST, since the password is
+    sent in the body.
+
+    Parameters:
+        job_id (str): The ID of the job.
+        item (VideoStreamRequestBody): Carries the encryption password.
+        user (dict): The current user.
+
+    Returns:
+        StreamingResponse: The original file.
+    """
+
+    job = await job_get(job_id, user["user_id"])
+    file_path = original_path(user["user_id"], job_id)
+
+    if not job or not file_path.exists():
+        return JSONResponse(
+            content={"result": {"error": "Original not found"}}, status_code=404
+        )
+
+    try:
+        private_key = deserialize_private_key_from_pem(
+            await user_get_private_key(user["user_id"]),
+            item.encryption_password or "",
+        )
+    except Exception:
+        return JSONResponse(
+            content={"result": {"error": "Wrong encryption password"}},
+            status_code=403,
+        )
+
+    filename = decrypt_filename(dict(job), private_key).get("filename") or "Recording"
+
+    return StreamingResponse(
+        decrypt_data_from_file(private_key, str(file_path)),
+        media_type=media_type(filename),
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}",
+            "Content-Length": str(get_encrypted_file_size(str(file_path))),
+        },
+    )

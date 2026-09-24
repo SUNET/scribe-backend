@@ -8,7 +8,7 @@ FastAPI backend for Sunet Scribe (transcription service). Requires Python ≥ 3.
 
 - **Framework**: FastAPI + SQLModel + Alembic (PostgreSQL via asyncpg/psycopg2)
 - **Entry point**: `app.py` — FastAPI app, OIDC auth callback, scheduler lock, startup hooks
-- **Routers**: `routers/` — `admin`, `analytics`, `announcements`, `customers`, `external`, `healthcheck`, `job`, `rules`, `transcriber`, `user`, `videostream`
+- **Routers**: `routers/` — `admin`, `analytics`, `announcements`, `customers`, `external`, `healthcheck`, `job`, `recording`, `rules`, `transcriber`, `user`, `videostream`
 - **Models**: `db/models.py` — SQLModel definitions for all tables
 - **Database CRUD**: `db/` — one module per domain (`user`, `group`, `customer`, `job`, `analytics`, `announcement`, `attribute_rules`, `onboarding_attributes`)
 - **DB session**: `db/session.py` — sync (`get_session`) + async (`create_async_engine`) factories. URL rewritten between `psycopg2`/`asyncpg` driver.
@@ -142,6 +142,20 @@ Payload shape (produced by transcribe-worker `utils/words.py`, which is the auth
 
 Flat and time-ordered rather than nested per segment, so it survives the user re-splitting or merging captions. `c` is omitted when the worker ran with `WORD_CONFIDENCE=false`. The backend stores it opaquely — bump `version` in the worker if the shape changes, and treat an unknown version as absent.
 
+## Recordings from the browser (`routers/recording.py`, `utils/recordings.py`)
+
+The frontend's recorder (`/record` in scribe-ui) sends a recording **in parts while it is being recorded**, not as one upload at the end. The browser deletes each part once it has been confirmed here, so it holds at most the last few unsent seconds, and when recording stops the rest is already here.
+
+- `PUT /recordings/{rid}/part/{seq}` — one part, encrypted to disk **as it arrives** (`encrypt_stream_to_file`, api_user's public key: the same key an uploaded file gets). Parts are never on disk in the clear. They are written to a temporary name and renamed into place, so a part is whole or absent. Sending the same part twice writes the same file twice, which is what makes resending after a lost answer safe.
+- `GET /recordings/{rid}` → `{parts, done}` — what is held, so a reloaded browser sends only what is missing.
+- `POST /recordings/{rid}/finish` (`RecordingFinishRequest`: `parts`, `name`, `mime`) — 409 `{"missing": [...]}` if parts are absent. Otherwise it creates the job, joins the parts and encrypts the result twice: `<job>` for api_user (the worker fetches it exactly like an upload, and it is removed when the job ends, as today) and **`<job>.orig.enc` for the user**, which only their encryption password opens. **Idempotent**: `done.json` remembers the job, so a finish repeated after a lost answer returns the same job instead of making a second one. A `.finishing` directory (created atomically, so it holds across worker processes) keeps two finishes from running at once. The second one gets 503 and retries into the `done` answer. A claim older than 15 minutes is a finish that died, and is taken over. A failed finish removes the job it made and keeps the parts.
+- `DELETE /recordings/{rid}` — an unfinished recording thrown away.
+- `rid` is `^[0-9a-f]{32}$`, chosen by the browser so a recording can start with no connection. The path is `<API_FILE_STORAGE_DIR>/<user_id>/recordings/<rid>/`, with `user_id` taken from the token and never from the request.
+- Answers follow the recorder's retry logic: 2xx move on, 409 send the listed parts, 422 never (stop retrying), 503 later.
+- `remove_abandoned_recordings` (hourly, scheduler worker only) sweeps recordings nobody has touched for `RECORDING_ABANDON_HOURS`. That includes the `done.json` of finished ones, which only needs to outlive a lost answer. The browser keeps what it has not had confirmed, so an unfinished recording swept by mistake is sent again, not lost.
+
+**The original** is served by `POST /transcriber/{job_id}/original` (the password goes in the body, hence POST), streamed with its decrypted file name. The job listing marks it with `has_original`. It lives exactly as long as the job: `job_files_remove()` in `db/job.py` is now the one list of a job's files, used by both `job_remove()` and the 7-day `job_cleanup()`. Add any new per-job file there.
+
 ## Migrations
 
 - Chained Alembic migrations under `alembic/versions/`.
@@ -155,4 +169,4 @@ Flat and time-ordered rather than nested per segment, so it survives the user re
 .venv/bin/python -m pytest
 ```
 
-Suites: `test_autentication.py`, `test_auth_handoff.py`, `test_crypto.py`, `test_rules.py`. Add a test for any auth/permission/crypto change before merging.
+Suites: `test_autentication.py`, `test_auth_handoff.py`, `test_crypto.py`, `test_recordings.py`, `test_rules.py`. The process does not exit by itself after the run: `utils/notifications.py` starts a non-daemon timer thread at import. The results are printed first; run with a `timeout` in scripts. Add a test for any auth/permission/crypto change before merging.

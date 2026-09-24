@@ -32,12 +32,38 @@ from pathlib import Path
 from sqlalchemy import select
 from typing import Optional
 from utils.log import get_logger
+from utils.recordings import ORIGINAL_SUFFIX
 from utils.settings import get_settings
 from utils.notifications import notifications
 from db.models import GroupUserLink
 
 log = get_logger()
 settings = get_settings()
+
+
+def job_files_remove(user_id: str, uuid: str) -> None:
+    """
+    Remove every file a job can have on disk: the input, the transcoded
+    media and, for a recording, the original kept for its owner.
+
+    Parameters:
+        user_id (str): The ID of the user owning the job.
+        uuid (str): The UUID of the job.
+
+    Returns:
+        None
+    """
+
+    directory = Path(settings.API_FILE_STORAGE_DIR) / user_id
+
+    for name in (
+        uuid,
+        f"{uuid}.enc",
+        f"{uuid}.mp4",
+        f"{uuid}.mp4.enc",
+        f"{uuid}{ORIGINAL_SUFFIX}",
+    ):
+        (directory / name).unlink(missing_ok=True)
 
 
 async def job_create(
@@ -299,28 +325,7 @@ async def job_remove(uuid: str) -> bool:
         if not job:
             return False
 
-        file_path = Path(settings.API_FILE_STORAGE_DIR) / job.user_id / job.uuid
-        file_path_mp4 = (
-            Path(settings.API_FILE_STORAGE_DIR) / job.user_id / f"{job.uuid}.mp4"
-        )
-        file_path_mp4_enc = (
-            Path(settings.API_FILE_STORAGE_DIR) / job.user_id / f"{job.uuid}.mp4.enc"
-        )
-        file_path_enc = (
-            Path(settings.API_FILE_STORAGE_DIR) / job.user_id / f"{job.uuid}.enc"
-        )
-
-        if file_path.exists():
-            file_path.unlink()
-
-        if file_path_mp4.exists():
-            file_path_mp4.unlink()
-
-        if file_path_enc.exists():
-            file_path_enc.unlink()
-
-        if file_path_mp4_enc.exists():
-            file_path_mp4_enc.unlink()
+        job_files_remove(job.user_id, job.uuid)
 
         # Anonymize job data instead of deleting the record.
         # We keep the record for auditing and billing purposes.
@@ -420,28 +425,7 @@ def job_cleanup() -> None:
 
         for job in jobs_to_cleanup:
             # Inline job removal logic (job_remove is now async)
-            file_path = Path(settings.API_FILE_STORAGE_DIR) / job.user_id / job.uuid
-            file_path_mp4 = (
-                Path(settings.API_FILE_STORAGE_DIR) / job.user_id / f"{job.uuid}.mp4"
-            )
-            file_path_mp4_enc = (
-                Path(settings.API_FILE_STORAGE_DIR) / job.user_id / f"{job.uuid}.mp4.enc"
-            )
-            file_path_enc = (
-                Path(settings.API_FILE_STORAGE_DIR) / job.user_id / f"{job.uuid}.enc"
-            )
-
-            if file_path.exists():
-                file_path.unlink()
-
-            if file_path_mp4.exists():
-                file_path_mp4.unlink()
-
-            if file_path_enc.exists():
-                file_path_enc.unlink()
-
-            if file_path_mp4_enc.exists():
-                file_path_mp4_enc.unlink()
+            job_files_remove(job.user_id, job.uuid)
 
             # Anonymize job data instead of deleting the record.
             # We keep the record for auditing and billing purposes.

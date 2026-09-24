@@ -96,6 +96,17 @@ class Settings(BaseSettings):
         1024 * 1024
     )  # 1MB - must match chunk_size in encrypt_data_to_file
 
+    # Recordings sent from the browser in parts (utils/recordings.py).
+    # A part is a few seconds of audio -- tens of KB at the bitrate the
+    # recorder asks for; the limit leaves room for a browser that ignores it.
+    RECORDING_MAX_PART_BYTES: int = 16 * 1024 * 1024
+    # The same ceiling an uploaded file has.
+    RECORDING_MAX_BYTES: int = 4 * 1024 * 1024 * 1024
+    # Parts of a recording nobody has sent to for this long are removed.
+    # The browser still holds anything not confirmed, so a recording taken
+    # up again after this is sent again rather than lost.
+    RECORDING_ABANDON_HOURS: int = 48
+
     # E-mail notifications
     NOTIFICATION_MAIL_UPDATED: dict = {
         "subject": "Your e-mail address have been updated",

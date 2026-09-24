@@ -35,6 +35,7 @@ from db.analytics import log_page_view
 from db.auth_handoff import handoff_cleanup, handoff_create, handoff_redeem
 from db.onboarding_attributes import seed_default_attributes
 from db.job import job_cleanup
+from utils.recordings import recordings
 from db.attribute_rules import apply_rule_actions, evaluate_rules
 from db.user import (
     notify_new_user_created,
@@ -56,6 +57,7 @@ from routers.customers import router as customers_router
 from routers.external import router as external_router
 from routers.healthcheck import router as healthcheck_router
 from routers.job import router as job_router
+from routers.recording import router as recording_router
 from routers.rules import router as rules_router
 from routers.transcriber import router as transcriber_router
 from routers.user import router as user_router
@@ -238,6 +240,7 @@ async def analytics_middleware(request: Request, call_next):
 
 app.include_router(transcriber_router, prefix=settings.API_PREFIX, tags=["transcriber"])
 app.include_router(job_router, prefix=settings.API_PREFIX, tags=["job"])
+app.include_router(recording_router, prefix=settings.API_PREFIX, tags=["recording"])
 app.include_router(user_router, prefix=settings.API_PREFIX, tags=["user"])
 app.include_router(videostream_router, prefix=settings.API_PREFIX, tags=["video"])
 app.include_router(external_router, prefix=settings.API_PREFIX, tags=["external"])
@@ -501,6 +504,25 @@ def remove_old_jobs() -> None:
         return
 
     job_cleanup()
+
+
+@app.on_event("startup")
+@repeat_every(seconds=60 * 60)
+def remove_abandoned_recordings() -> None:
+    """
+    Periodic task to remove the parts of recordings nobody finished.
+
+    Returns:
+        None
+    """
+
+    if not scheduler_worker:
+        return
+
+    removed = recordings.sweep(settings.RECORDING_ABANDON_HOURS * 3600)
+
+    if removed:
+        log.info(f"Removed {removed} abandoned recording(s).")
 
 
 @app.on_event("startup")
