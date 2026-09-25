@@ -348,6 +348,7 @@ async def auth(request: Request):
             realm=realm,
             user_id=decoded_jwt["sub"],
             email=decoded_jwt.get("email", ""),
+            login=True,
         )
         log.info(f"About to evaluate rules for user {user.get('user_id', '')}.")
         actions = await evaluate_rules(decoded_jwt, user)

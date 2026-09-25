@@ -53,6 +53,7 @@ async def user_create(
     realm: str,
     user_id: Optional[str] = None,
     email: Optional[str] = None,
+    login: bool = False,
 ) -> dict:
     """
     Create a new user in the database.
@@ -61,6 +62,10 @@ async def user_create(
         username (str): The username of the user.
         realm (str): The realm/domain of the user.
         user_id (Optional[str]): The unique identifier of the user.
+        login (bool): This is an actual sign-in (the OIDC callback), so
+            last_login is set.  Every authenticated request comes through
+            here too (verify_user), and stamping last_login on each of them
+            turned every read into a write.
 
     Returns:
         dict: The created user as a dictionary.
@@ -85,7 +90,9 @@ async def user_create(
                     f"User {user.user_id} was previously deleted, resetting deleted flag."
                 )
 
-            user.last_login = datetime.now(UTC).replace(tzinfo=None)
+            if login:
+                user.last_login = datetime.now(UTC).replace(tzinfo=None)
+
             result = user.as_dict()
             result["created"] = False
 
@@ -480,7 +487,9 @@ async def user_update(
         if not user:
             return {}
 
-        user.last_login = datetime.now(UTC).replace(tzinfo=None)
+        # Not last_login: this is called for the worker's transcribed
+        # seconds and for admin changes, neither of which is the user
+        # signing in.  That is set by user_create(login=True).
 
         if transcribed_seconds:
             user.transcribed_seconds += float(transcribed_seconds)
