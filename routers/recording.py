@@ -39,7 +39,7 @@ from db.job import job_create, job_remove, job_update
 from db.models import JobStatusEnum, JobType
 from db.user import user_get, user_get_private_key, user_get_public_key
 from utils.crypto import (
-    deserialize_private_key_from_pem,
+    load_private_key,
     deserialize_public_key_from_pem,
     encrypt_string,
 )
@@ -194,7 +194,7 @@ async def recording_finish(
             return JSONResponse({"done": done})
 
         api_user = await _api_user()
-        api_private_key = deserialize_private_key_from_pem(
+        api_private_key = await load_private_key(
             await user_get_private_key(api_user["user_id"]),
             settings.API_PRIVATE_KEY_PASSWORD,
         )

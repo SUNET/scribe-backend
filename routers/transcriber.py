@@ -15,6 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import asyncio
 from fastapi import APIRouter, UploadFile, Request, Depends, Query, File
 from fastapi.responses import JSONResponse, StreamingResponse
 from urllib.parse import quote
@@ -40,7 +41,7 @@ from pathlib import Path
 from auth.oidc import get_current_user
 from utils.crypto import (
     deserialize_public_key_from_pem,
-    deserialize_private_key_from_pem,
+    load_private_key,
     encrypt_string,
     decrypt_string,
     encrypt_stream_to_file,
@@ -124,7 +125,7 @@ async def transcribe(
     if encryption_password:
         try:
             raw_private_key = await user_get_private_key(user["user_id"])
-            private_key = deserialize_private_key_from_pem(
+            private_key = await load_private_key(
                 raw_private_key, encryption_password
             )
         except Exception:
@@ -132,9 +133,14 @@ async def transcribe(
 
     if private_key:
         if isinstance(res, dict) and "jobs" in res:
-            res["jobs"] = [decrypt_filename(job, private_key) for job in res["jobs"]]
+            # ~4 ms of RSA per filename: a long list is most of a second,
+            # so it is decrypted in a thread, all of it in one go.
+            jobs = res["jobs"]
+            res["jobs"] = await asyncio.to_thread(
+                lambda: [decrypt_filename(job, private_key) for job in jobs]
+            )
         elif isinstance(res, dict) and "uuid" in res:
-            res = decrypt_filename(res, private_key)
+            res = await asyncio.to_thread(decrypt_filename, res, private_key)
 
     return JSONResponse(content={"result": res})
 
@@ -307,10 +313,12 @@ async def update_transcription_status(
     try:
         raw_private_key = await user_get_private_key(user["user_id"])
         if item.encryption_password:
-            deserialized_key = deserialize_private_key_from_pem(
+            deserialized_key = await load_private_key(
                 raw_private_key, item.encryption_password
             )
-            filename = decrypt_string(deserialized_key, filename)
+            filename = await asyncio.to_thread(
+                decrypt_string, deserialized_key, filename
+            )
     except Exception:
         pass
 
@@ -419,7 +427,7 @@ async def get_transcription_result(
         encrypted_result = True
 
         try:
-            deserialized_private_key = deserialize_private_key_from_pem(
+            deserialized_private_key = await load_private_key(
                 private_key, encryption_password
             )
         except Exception:
@@ -433,7 +441,9 @@ async def get_transcription_result(
 
             if encrypted_result:
                 try:
-                    content = decrypt_string(deserialized_private_key, content)
+                    content = await asyncio.to_thread(
+                        decrypt_string, deserialized_private_key, content
+                    )
                 except ValueError:
                     content = job_result.get("result", "")
         case OutputFormatEnum.SRT:
@@ -441,7 +451,9 @@ async def get_transcription_result(
 
             if encrypted_result:
                 try:
-                    content = decrypt_string(deserialized_private_key, content)
+                    content = await asyncio.to_thread(
+                        decrypt_string, deserialized_private_key, content
+                    )
                 except ValueError:
                     content = job_result.get("result_srt", "")
         case OutputFormatEnum.CSV:
@@ -506,10 +518,12 @@ async def get_transcription_words(
         private_key = await user_get_private_key(user["user_id"])
 
         try:
-            deserialized_private_key = deserialize_private_key_from_pem(
+            deserialized_private_key = await load_private_key(
                 private_key, encryption_password
             )
-            content = decrypt_string(deserialized_private_key, content)
+            content = await asyncio.to_thread(
+                decrypt_string, deserialized_private_key, content
+            )
         except (ValueError, TypeError):
             content = job_result.get("result_words") or ""
 
@@ -547,7 +561,7 @@ async def get_original_recording(
         )
 
     try:
-        private_key = deserialize_private_key_from_pem(
+        private_key = await load_private_key(
             await user_get_private_key(user["user_id"]),
             item.encryption_password or "",
         )
@@ -557,7 +571,9 @@ async def get_original_recording(
             status_code=403,
         )
 
-    filename = decrypt_filename(dict(job), private_key).get("filename") or "Recording"
+    filename = (
+        await asyncio.to_thread(decrypt_filename, dict(job), private_key)
+    ).get("filename") or "Recording"
 
     return StreamingResponse(
         decrypt_data_from_file(private_key, str(file_path)),

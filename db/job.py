@@ -15,6 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import asyncio
 import json
 
 from datetime import datetime, timedelta
@@ -325,7 +326,7 @@ async def job_remove(uuid: str) -> bool:
         if not job:
             return False
 
-        job_files_remove(job.user_id, job.uuid)
+        await asyncio.to_thread(job_files_remove, job.user_id, job.uuid)
 
         # Anonymize job data instead of deleting the record.
         # We keep the record for auditing and billing purposes.

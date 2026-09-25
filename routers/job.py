@@ -42,7 +42,7 @@ from utils.settings import get_settings
 
 from utils.crypto import (
     decrypt_data_from_file,
-    deserialize_private_key_from_pem,
+    load_private_key,
     deserialize_public_key_from_pem,
     encrypt_stream_to_file,
     encrypt_string,
@@ -178,7 +178,7 @@ async def get_transcription_file(
         )
 
     private_key = await user_get_private_key(api_user["user_id"])
-    private_key = deserialize_private_key_from_pem(
+    private_key = await load_private_key(
         private_key, settings.API_PRIVATE_KEY_PASSWORD
     )
 

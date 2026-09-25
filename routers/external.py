@@ -15,6 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import asyncio
 import aiofiles
 import httpx
 
@@ -39,7 +40,7 @@ from utils.crypto import (
     encrypt_data_to_file,
     deserialize_public_key_from_pem,
     decrypt_string,
-    deserialize_private_key_from_pem,
+    load_private_key,
 )
 
 
@@ -92,7 +93,7 @@ async def get_job_external(
         # Decrypt the result text
         user = await user_get(username="api_user")
         private_key = await user_get_private_key(user["user_id"])
-        deserialized_private_key = deserialize_private_key_from_pem(
+        deserialized_private_key = await load_private_key(
             private_key, settings.API_PRIVATE_KEY_PASSWORD
         )
     except Exception as e:
@@ -214,7 +215,8 @@ async def transcribe_external_file(
         public_key = await user_get_public_key(api_user["user_id"])
         public_key = deserialize_public_key_from_pem(public_key)
 
-        encrypt_data_to_file(
+        await asyncio.to_thread(
+            encrypt_data_to_file,
             public_key,
             kaltura_repsonse.content,
             dest_path,

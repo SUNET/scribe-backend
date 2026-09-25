@@ -15,6 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import asyncio
 from auth.oidc import get_current_user
 from db.job import job_get
 from db.user import user_get_private_key
@@ -23,7 +24,7 @@ from fastapi.responses import JSONResponse, Response, StreamingResponse
 from pathlib import Path
 from utils.crypto import (
     decrypt_data_from_file,
-    deserialize_private_key_from_pem,
+    load_private_key,
     get_encrypted_file_actual_size,
 )
 from utils.settings import get_settings
@@ -59,7 +60,7 @@ async def get_video_stream(
 
     if item.encryption_password != "" and item.encryption_password is not None:
         private_key = await user_get_private_key(user["user_id"])
-        private_key = deserialize_private_key_from_pem(
+        private_key = await load_private_key(
             private_key, item.encryption_password
         )
         file_path = Path(api_file_storage_dir) / user["user_id"] / f"{job_id}.mp4.enc"
@@ -105,8 +106,9 @@ async def get_video_stream(
     # New way to serve encrypted video files
     if encrypted_media:
         # Get the actual available file size (not the declared size)
-        filesize_actual = get_encrypted_file_actual_size(
-            file_path, settings.CRYPTO_CHUNK_SIZE
+        # Walks every chunk header of the file: blocking disk I/O.
+        filesize_actual = await asyncio.to_thread(
+            get_encrypted_file_actual_size, file_path, settings.CRYPTO_CHUNK_SIZE
         )
 
         if filesize_actual == 0:
@@ -191,15 +193,18 @@ async def get_video_stream(
             range_start = int(range_start_str)
             range_end = int(range_end_str) if range_end_str else filesize - 1
 
-        with open(file_path, "rb") as video:
-            video.seek(range_start)
-            data = video.read(range_end - range_start + 1)
-            headers = {
-                "Content-Range": f"bytes {str(range_start)}-{str(range_end)}/{filesize}",
-                "Accept-Ranges": "bytes",
-                "Content-Length": str(len(data)),
-            }
+        def read_range() -> bytes:
+            with open(file_path, "rb") as video:
+                video.seek(range_start)
+                return video.read(range_end - range_start + 1)
 
-            return Response(
-                data, status_code=206, headers=headers, media_type="video/mp4"
-            )
+        data = await asyncio.to_thread(read_range)
+        headers = {
+            "Content-Range": f"bytes {str(range_start)}-{str(range_end)}/{filesize}",
+            "Accept-Ranges": "bytes",
+            "Content-Length": str(len(data)),
+        }
+
+        return Response(
+            data, status_code=206, headers=headers, media_type="video/mp4"
+        )

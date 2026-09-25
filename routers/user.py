@@ -15,6 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import asyncio
 from auth.oidc import get_current_user
 from db.announcement import announcement_get_active
 from db.user import (
@@ -87,7 +88,9 @@ async def set_user_info(
         private_key = await user_get_private_key(user["user_id"])
 
         try:
-            validate_private_key_password(private_key, item.encryption_password)
+            await asyncio.to_thread(
+                validate_private_key_password, private_key, item.encryption_password
+            )
         except ValueError:
             log.info(
                 f"Invalid private key password for user {user["user_id"]}"

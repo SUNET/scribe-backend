@@ -119,6 +119,33 @@ def deserialize_private_key_from_pem(
     return serialization.load_pem_private_key(pem_data, password=password)
 
 
+async def load_private_key(
+    pem_data: bytes,
+    password: bytes,
+) -> rsa.RSAPrivateKey:
+    """
+    deserialize_private_key_from_pem, off the event loop.
+
+    Opening a 4096-bit key runs OpenSSL's consistency check on it, around a
+    fifth of a second of CPU.  On the event loop that stalled every other
+    request the worker was serving, and nearly every request that opens a
+    user's files -- the job list My files polls, every range request of the
+    video, every result -- starts with it.  Deliberately not remembered
+    between requests: an opened key lives no longer than the request that
+    needed it, exactly as before.  Raises as deserialize_private_key_from_pem
+    does for a wrong password.
+
+    Parameters:
+        pem_data (bytes): The PEM-formatted private key data.
+        password (bytes): The password to decrypt the private key.
+
+    Returns:
+        rsa.RSAPrivateKey: The deserialized RSA private key.
+    """
+
+    return await asyncio.to_thread(deserialize_private_key_from_pem, pem_data, password)
+
+
 def deserialize_public_key_from_pem(
     pem_data: bytes,
 ) -> rsa.RSAPublicKey:

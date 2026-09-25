@@ -15,6 +15,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import asyncio
 import calendar
 
 from datetime import UTC, datetime, timedelta
@@ -123,14 +124,16 @@ async def notify_new_user_created(user: dict) -> None:
             continue
 
         if admin_email := await user_get_notifications(admin["user_id"], "user"):
-            if notifications.notification_sent_record_exists(
-                admin["user_id"], user_id, "user_creation"
+            if await asyncio.to_thread(
+                notifications.notification_sent_record_exists,
+                admin["user_id"], user_id, "user_creation",
             ):
                 continue
 
             notifications.send_new_user_created(admin_email, username)
-            notifications.notification_sent_record_add(
-                admin["user_id"], user_id, "user_creation"
+            await asyncio.to_thread(
+                notifications.notification_sent_record_add,
+                admin["user_id"], user_id, "user_creation",
             )
             log.info(f"Sent new user creation notification to admin {admin_email}")
 
@@ -504,13 +507,15 @@ async def user_update(
                 user.email != ""
                 and user.email is not None
                 and user.active
-                and not notifications.notification_sent_record_exists(
-                    user.user_id, user.user_id, "account_activated"
+                and not await asyncio.to_thread(
+                    notifications.notification_sent_record_exists,
+                    user.user_id, user.user_id, "account_activated",
                 )
             ):
                 notifications.notification_send_account_activated(user.email)
-                notifications.notification_sent_record_add(
-                    user.user_id, user.user_id, "account_activated"
+                await asyncio.to_thread(
+                    notifications.notification_sent_record_add,
+                    user.user_id, user.user_id, "account_activated",
                 )
 
         if admin is not None:
@@ -526,9 +531,10 @@ async def user_update(
 
             user.encryption_settings = True
 
-            # Generate RSA key pair
-            private_key, public_key = generate_rsa_keypair(
-                key_size=settings.CRYPTO_KEY_SIZE
+            # Generate RSA key pair: several tenths of a second of CPU for a
+            # 4096-bit key, so in a thread rather than on the loop.
+            private_key, public_key = await asyncio.to_thread(
+                generate_rsa_keypair, key_size=settings.CRYPTO_KEY_SIZE
             )
 
             # Serialize keys to PEM format
