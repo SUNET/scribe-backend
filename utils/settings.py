@@ -238,9 +238,9 @@ Usage summary:
 - Minutes remaining: {remaining_minutes}
 
 Best regards,
-Sunet Scribe
+{branding_name}
 
-This is an automated message from Sunet Scribe. If you need assistance, please contact your local support.
+This is an automated message from {branding_name}. If you need assistance, please contact your local support.
 """,
     }
 
@@ -257,14 +257,14 @@ Usage summary:
 - Remaining: {remaining_minutes} minutes
 
 Best regards,
-Sunet Scribe
+{branding_name}
 
-This is an automated message from Sunet Scribe. If you need assistance, please contact your local support.
+This is an automated message from {branding_name}. If you need assistance, please contact your local support.
 """,
     }
 
     NOTIFICATION_MAIL_WEEKLY_USAGE_REPORT: dict = {
-        "subject": "Weekly usage report for Sunet Scribe",
+        "subject": "Weekly usage report for {branding_name}",
         "message": """\
 Hello,
 
@@ -284,9 +284,9 @@ Block usage:
 - Overage minutes: {overage_minutes}
 
 Best regards,
-Sunet Scribe
+{branding_name}
 
-This is an automated message from Sunet Scribe. If you need assistance, please contact your local support.
+This is an automated message from {branding_name}. If you need assistance, please contact your local support.
 """,
     }
 
