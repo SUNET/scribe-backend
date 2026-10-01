@@ -15,8 +15,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from datetime import UTC, datetime
 from db.customer import customer_get_from_user_id
-from db.models import Group, GroupModelLink, GroupUserLink, User
+from db.models import (
+    Group,
+    GroupModelLink,
+    GroupUserLink,
+    Job,
+    JobStatusEnum,
+    JobType,
+    User,
+)
 from db.session import RejectedOperation, get_async_session, get_session
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
@@ -294,36 +303,44 @@ async def group_get_all(user_id: str, realm: str) -> list[dict]:
     return groups_list
 
 
-async def group_get_quota_left(group_id: int) -> int:
+def _month_start() -> datetime:
     """
-    Get the remaining quota seconds for a group.
+    Start of the current calendar month, as a naive UTC datetime to match
+    Job.created_at.
+    """
 
-    Parameters:
-        group_id (int): The ID of the group.
+    return datetime.now(UTC).replace(
+        day=1, hour=0, minute=0, second=0, microsecond=0, tzinfo=None
+    )
+
+
+def group_monthly_usage():
+    """
+    Build a subquery of transcribed seconds per group for the current month.
+
+    Counts completed (and later deleted) transcription jobs created this month
+    by the group's current members. This is what group quotas are measured
+    against, both when enforcing them and when alerting on them.
 
     Returns:
-        int: The remaining quota seconds for the group.
+        Subquery with the columns group_id and used_seconds.
     """
 
-    async with get_async_session() as session:
-        result = await session.execute(
-            select(Group).where(Group.id == group_id)
+    return (
+        select(
+            GroupUserLink.group_id.label("group_id"),
+            func.coalesce(func.sum(Job.transcribed_seconds), 0).label("used_seconds"),
         )
-        group = result.scalars().first()
-        if not group:
-            return 0
-
-        quota_seconds = group.quota_seconds
-
-        used_seconds = (
-            await session.execute(
-                select(func.coalesce(func.sum(User.transcribed_seconds), 0))
-                .join(GroupUserLink, GroupUserLink.user_id == User.id)
-                .where(GroupUserLink.group_id == group_id)
-            )
-        ).scalar()
-
-        return max(quota_seconds - used_seconds, 0)
+        .join(User, User.id == GroupUserLink.user_id)
+        .join(Job, Job.user_id == User.user_id)
+        .where(
+            Job.job_type == JobType.TRANSCRIPTION,
+            Job.status.in_([JobStatusEnum.COMPLETED, JobStatusEnum.DELETED]),
+            Job.created_at >= _month_start(),
+        )
+        .group_by(GroupUserLink.group_id)
+        .subquery()
+    )
 
 
 async def group_delete(group_id: int) -> bool:
@@ -631,18 +648,20 @@ def check_group_quota_alerts() -> None:
     """
 
     with get_session() as session:
-        # Fetch groups with quota and their usage in one query
+        # Fetch groups with quota and their usage this month in one query
+        usage = group_monthly_usage()
         group_usage_rows = (
             session.query(
                 Group,
-                func.coalesce(func.sum(User.transcribed_seconds), 0).label("used_seconds"),
+                func.coalesce(usage.c.used_seconds, 0).label("used_seconds"),
             )
-            .outerjoin(GroupUserLink, GroupUserLink.group_id == Group.id)
-            .outerjoin(User, User.id == GroupUserLink.user_id)
+            .outerjoin(usage, usage.c.group_id == Group.id)
             .filter(Group.quota_seconds > 0)
-            .group_by(Group.id)
             .all()
         )
+
+        # Quotas reset monthly, so alerts are deduplicated per month too
+        month = _month_start().strftime("%Y-%m")
 
         for group, used_seconds in group_usage_rows:
             quota_seconds = group.quota_seconds
@@ -669,7 +688,7 @@ def check_group_quota_alerts() -> None:
                     continue
 
                 if notifications.notification_sent_record_exists(
-                    admin_user.user_id, str(group.id), "group_quota_alert"
+                    admin_user.user_id, f"{group.id}:{month}", "group_quota_alert"
                 ):
                     continue
 
@@ -683,7 +702,7 @@ def check_group_quota_alerts() -> None:
                 )
 
                 notifications.notification_sent_record_add(
-                    admin_user.user_id, str(group.id), "group_quota_alert"
+                    admin_user.user_id, f"{group.id}:{month}", "group_quota_alert"
                 )
 
                 log.info(
