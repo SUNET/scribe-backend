@@ -25,6 +25,7 @@ from auth.client import dn_in_list
 from sqlalchemy import func, select
 from utils.log import get_logger
 
+from db.group import group_monthly_usage
 from db.models import (
     Customer,
     Group,
@@ -406,7 +407,10 @@ async def user_get_all(realm) -> list:
 
 async def user_get_quota_left(user_id: str) -> bool:
     """
-    Get the transcription quota left for a user.
+    Check whether a user's group has transcription quota left this month.
+
+    Usage is the group's total for the current month, not the user's own.
+    A user in no group, or in a group without a quota, is unlimited.
 
     Parameters:
         user_id (str): The user ID.
@@ -416,31 +420,28 @@ async def user_get_quota_left(user_id: str) -> bool:
     """
 
     async with get_async_session() as session:
+        usage = group_monthly_usage()
         result = await session.execute(
-            select(Group).where(Group.users.any(User.user_id == user_id))
+            select(
+                Group.quota_seconds,
+                func.coalesce(usage.c.used_seconds, 0),
+            )
+            .join(GroupUserLink, GroupUserLink.group_id == Group.id)
+            .join(User, User.id == GroupUserLink.user_id)
+            .outerjoin(usage, usage.c.group_id == Group.id)
+            .where(User.user_id == user_id)
         )
-        groups = result.scalars().all()
+        rows = result.all()
 
-        if not groups:
+    if not rows:
+        return True
+
+    for quota_seconds, used_seconds in rows:
+        if not quota_seconds:
             return True
 
-        for group in groups:
-            if group.quota_seconds == 0:
-                return True
-
-            group_statistics_res = await group_statistics(group.id, user_id, group.realm)
-
-            if not group_statistics_res:
-                return True
-
-            if "total_transcribed_minutes" not in group_statistics_res:
-                return True
-
-            if (
-                group_statistics_res["total_transcribed_minutes"]
-                < group.quota_seconds / 60
-            ):
-                return True
+        if used_seconds < quota_seconds:
+            return True
 
     return False
 
@@ -941,47 +942,6 @@ async def group_statistics(group_id: int, user_id: str, realm: str) -> dict:
     }
 
     return condensed_stats
-
-
-async def user_can_transcribe(user_id: str) -> int:
-    """
-    Check which group a user belongs to and check whether the user have
-    quota left or not.
-
-    Parameters:
-        user_id (str): The user ID.
-
-    Returns:
-        int:
-            -1 if the user has unlimited quota,
-            0 if the user has no quota left,
-            >0 indicating the number of seconds left in the quota.
-    """
-
-    async with get_async_session() as session:
-        result = await session.execute(
-            select(User).where(User.user_id == user_id)
-        )
-        user = result.scalars().first()
-        if not user:
-            return 0
-
-        result = await session.execute(
-            select(Group).where(Group.users.any(User.user_id == user_id))
-        )
-        groups = result.scalars().all()
-
-        if not groups:
-            return -1
-
-        for group in groups:
-            if group.quota_seconds == 0:
-                return -1  # Unlimited quota
-
-            if user.transcribed_seconds < group.quota_seconds:
-                return group.quota_seconds - user.transcribed_seconds
-
-        return 0
 
 
 async def user_get_notifications(user_id: str, notification: str) -> Optional[str]:
