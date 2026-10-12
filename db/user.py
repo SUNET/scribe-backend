@@ -43,6 +43,7 @@ from utils.crypto import (
     serialize_public_key_to_pem,
 )
 from utils.notifications import notifications
+from utils.realms import csv_has
 from utils.settings import get_settings
 
 settings = get_settings()
@@ -990,12 +991,9 @@ async def users_admin_domains_from_realm(realm: str) -> list:
             )
         )
 
-        # admin_domains is comma-separated; the LIKE only narrows candidates,
-        # so match whole entries (not "su.se" inside "kau.su.se").
-        wanted = realm.strip().lower()
+        # The LIKE only narrows candidates; match whole entries.
         return [
             user.as_dict()
             for user in result.scalars().all()
-            if wanted
-            in [d.strip().lower() for d in (user.admin_domains or "").split(",")]
+            if csv_has(user.admin_domains, realm)
         ]

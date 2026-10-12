@@ -27,6 +27,7 @@ from db.session import get_async_session, get_session
 from typing import Optional
 from utils.log import get_logger
 from utils.notifications import notifications
+from utils.realms import csv_has
 from utils.settings import get_settings
 
 settings = get_settings()
@@ -881,18 +882,23 @@ def check_quota_alerts() -> None:
             if usage_percent < 95:
                 continue
 
+            # Usage counts the current calendar month, so dedupe per month
+            alert_key = f"{customer.id}:{datetime.now(UTC).strftime('%Y-%m')}"
+
             realm_list = [r.strip() for r in customer.realms.split(",") if r.strip()]
 
             for realm in realm_list:
-                admin_users = (
-                    session.query(User)
+                admin_users = [
+                    u
+                    for u in session.query(User)
                     .filter(
                         User.admin == True,  # noqa: E712
                         User.deleted == False,  # noqa: E712
                         User.admin_domains.ilike(f"%{realm}%"),
                     )
                     .all()
-                )
+                    if csv_has(u.admin_domains, realm)
+                ]
 
                 for admin_user in admin_users:
                     if (
@@ -905,7 +911,7 @@ def check_quota_alerts() -> None:
                         continue
 
                     if notifications.notification_sent_record_exists(
-                        admin_user.user_id, str(customer.id), "quota_alert"
+                        admin_user.user_id, alert_key, "quota_alert"
                     ):
                         continue
 
@@ -920,7 +926,7 @@ def check_quota_alerts() -> None:
                     )
 
                     notifications.notification_sent_record_add(
-                        admin_user.user_id, str(customer.id), "quota_alert"
+                        admin_user.user_id, alert_key, "quota_alert"
                     )
 
                     log.info(

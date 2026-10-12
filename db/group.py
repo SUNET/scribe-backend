@@ -33,6 +33,7 @@ from typing import Optional
 
 from utils.log import get_logger
 from utils.notifications import notifications
+from utils.realms import csv_has
 
 log = get_logger()
 
@@ -675,10 +676,16 @@ def check_group_quota_alerts() -> None:
             used_minutes = used_seconds // 60
             remaining_minutes = max(quota_minutes - used_minutes, 0)
 
-            admin_users = session.query(User).filter(
-                User.admin == True,
-                User.admin_domains.ilike(f"%{group.realm}%"),
-            ).all()
+            admin_users = [
+                u
+                for u in session.query(User)
+                .filter(
+                    User.admin == True,
+                    User.admin_domains.ilike(f"%{group.realm}%"),
+                )
+                .all()
+                if csv_has(u.admin_domains, group.realm)
+            ]
 
             for admin_user in admin_users:
                 if not admin_user.notifications or "quota" not in admin_user.notifications.split(","):
