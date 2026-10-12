@@ -985,9 +985,17 @@ async def users_admin_domains_from_realm(realm: str) -> list:
     async with get_async_session() as session:
         result = await session.execute(
             select(User).where(
-                User.admin_domains.ilike(realm), User.deleted == False  # noqa: E712
+                User.admin_domains.ilike(f"%{realm}%"),
+                User.deleted == False,  # noqa: E712
             )
         )
-        users = result.scalars().all()
 
-        return [user.as_dict() for user in users]
+        # admin_domains is comma-separated; the LIKE only narrows candidates,
+        # so match whole entries (not "su.se" inside "kau.su.se").
+        wanted = realm.strip().lower()
+        return [
+            user.as_dict()
+            for user in result.scalars().all()
+            if wanted
+            in [d.strip().lower() for d in (user.admin_domains or "").split(",")]
+        ]
