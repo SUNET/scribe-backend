@@ -142,6 +142,7 @@ app.add_middleware(
 app.add_middleware(
     SessionMiddleware,
     settings.API_SECRET_KEY,
+    session_cookie="scribe_api_session",
     https_only=not settings.API_DEBUG,
     same_site="lax",
 )
