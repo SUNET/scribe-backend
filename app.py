@@ -344,6 +344,14 @@ async def auth(request: Request):
     # Evaluate attribute-based onboarding rules at login time
     try:
         decoded_jwt = await verify_token(id_token=token["access_token"])
+        # Values only for the non-PII allowlist, never the rest of the claims.
+        _safe_claims = ("company",)
+        log.info(
+            "Login claims for %s: access_token=%s userinfo=%s",
+            decoded_jwt.get("sub"),
+            {k: decoded_jwt[k] for k in _safe_claims if k in decoded_jwt},
+            {k: userinfo[k] for k in _safe_claims if k in userinfo},
+        )
         username = decoded_jwt.get("preferred_username", "")
         realm = decoded_jwt.get(
             "realm", username.split("@")[-1] if "@" in username else ""
