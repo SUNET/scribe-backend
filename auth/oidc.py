@@ -35,7 +35,7 @@ oauth.register(
     server_metadata_url=settings.OIDC_METADATA_URL,
     client_id=settings.OIDC_CLIENT_ID,
     client_secret=settings.OIDC_CLIENT_SECRET,
-    client_kwargs={"scope": "openid profile email"},
+    client_kwargs={"scope": settings.OIDC_SCOPE},
     redirect_uri=settings.OIDC_REDIRECT_URI,
 )
 
