@@ -18,6 +18,7 @@
 import json
 import time
 
+from datetime import UTC
 from db.models import WorkerHealth
 from db.session import get_session
 from sqlalchemy import func
@@ -108,7 +109,7 @@ class HealthStatus:
                         "load_avg": entry.load_avg,
                         "memory_usage": entry.memory_usage,
                         "gpu_usage": gpu_usage,
-                        "seen": entry.created_at.timestamp()
+                        "seen": entry.created_at.replace(tzinfo=UTC).timestamp()
                         if entry.created_at
                         else time.time(),
                     }
