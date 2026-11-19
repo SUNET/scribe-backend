@@ -55,6 +55,9 @@ async def get_user_info(
     """
 
     result = dict(user)
+    # The password-protected private key is only ever used server-side
+    # (decryption endpoints fetch it themselves). Never hand it to a client.
+    result.pop("private_key", None)
     result["announcements"] = await announcement_get_active()
     return JSONResponse(content={"result": result})
 
